@@ -30,6 +30,7 @@ class Animal(pygame.sprite.Sprite):
         self.manager = animal_manager
         self.game_state = animal_manager.game_state
         self.age = random.uniform(0.2, 1.0)
+        self.group_id = random.randint(1000, 9999)
         self.speed = config['speed'] * self.age * (TILE_SIZE / 32)
         
         self.hunger = random.randint(50, 80)
@@ -177,29 +178,29 @@ class Animal(pygame.sprite.Sprite):
             self.state = "idle"
     
     def wander(self, dt):
-        """Wander around aimlessly"""
         if not self.wandering:
-            wander_range = 10 * TILE_SIZE
-            x = self.position[0] + random.uniform(-wander_range, wander_range)
-            y = self.position[1] + random.uniform(-wander_range, wander_range)
-
-            if self.terrain.is_water_at_position((x, y)) and self.species != "crocodile":
-                self.target_position = None
-                self.wandering = False
-                return
-
-            self.target_position = (x, y)
+            if hasattr(self, "group_center") and self.group_center:
+                gx, gy = self.group_center
+                jitter = TILE_SIZE * 3
+                x = gx + random.uniform(-jitter, jitter)
+                y = gy + random.uniform(-jitter, jitter)
+                self.target_position = (x, y)
+            else:
+                wander_range = 10 * TILE_SIZE
+                x = self.position[0] + random.uniform(-wander_range, wander_range)
+                y = self.position[1] + random.uniform(-wander_range, wander_range)
+                self.target_position = (x, y)
             self.wandering = True
             self.wander_timer = random.uniform(5, 15)
 
         if self.wandering:
             self.move_to_target(dt)
-
             self.wander_timer -= dt
 
             if self.target_position and (distance(self.position, self.target_position) < TILE_SIZE or self.wander_timer <= 0):
                 self.wandering = False
                 self.wander_timer = random.uniform(2, 5)
+
     
     def move_to_target(self, dt):
         """Move toward target position"""

@@ -62,36 +62,31 @@ class AnimalManager:
             for _ in range(count):
                 self.spawn_animal(species)
     
-    def spawn_animal(self, species):
-        """Spawn a new animal of the given species"""
-        spawn_position = self.find_spawn_position(species)
-        
+    def spawn_animal(self, species, nearby=None, group_id=None):
+        spawn_position = self.find_spawn_position(species, nearby)
         animal = Animal(species, spawn_position, self.terrain, self)
-        
+        if group_id is not None:
+            animal.group_id = group_id
+        else:
+            animal.group_id = random.randint(1000, 9999)
+
         self.animals.append(animal)
         self.animals_group.add(animal)
-        
         return animal
-    
-    def find_spawn_position(self, species):
-        """Find a suitable spawn position for the given species"""
-        size = self.terrain.size * TILE_SIZE
-        max_attempts = 50
-        
-        for _ in range(max_attempts):
-            x = random.uniform(-size/2, size/2)
-            y = random.uniform(-size/2, size/2)
-            pos = (x, y)
-            
-            terrain_type = self.terrain.get_terrain_at_position(pos)
-            
-            if species == "crocodile" and terrain_type == "water":
-                return pos
-            elif terrain_type == "grass":
-                return pos
-        
-        return (0, 0)
-    
+
+    def find_spawn_position(self, species, nearby=None):
+        if nearby:
+            for _ in range(20):
+                dx = random.uniform(-TILE_SIZE * 3, TILE_SIZE * 3)
+                dy = random.uniform(-TILE_SIZE * 3, TILE_SIZE * 3)
+                pos = (nearby[0] + dx, nearby[1] + dy)
+                terrain_type = self.terrain.get_terrain_at_position(pos)
+                if species == "crocodile" and terrain_type == "water":
+                    return pos
+                elif terrain_type == "grass":
+                    return pos
+        return self.find_spawn_position(species)
+
     def update(self, dt):
         """Update all animals"""
         for animal in list(self.animals):
@@ -103,6 +98,8 @@ class AnimalManager:
         self.update_animal_stats()
         
         self.try_natural_spawning(dt)
+        self.try_group_reproduction(dt)
+        self.update_group_movement(dt)
     
     def remove_animal(self, animal):
         """Remove an animal from the simulation"""
@@ -157,6 +154,30 @@ class AnimalManager:
                     self.spawn_animal(species)
                     self.game_state.add_notification(f"A new {species} has appeared!")
     
+    def try_group_reproduction(self, dt):
+        """Let animal groups reproduce if they meet conditions"""
+        group_min_size = 3
+        reproduction_cooldown = 30  # seconds between reproductions per group
+
+        if not hasattr(self, "last_reproduction_time"):
+            self.last_reproduction_time = {}
+
+        species_groups = {}
+
+        for animal in self.animals:
+            if animal.age >= 0.8:  # consider adult
+                key = (animal.species, animal.group_id)
+                species_groups.setdefault(key, []).append(animal)
+
+        for (species, group_id), group in species_groups.items():
+            if len(group) >= group_min_size:
+                last_time = self.last_reproduction_time.get((species, group_id), 0)
+                if self.game_state.time_elapsed - last_time > reproduction_cooldown:
+                    parent = random.choice(group)
+                    self.spawn_animal(species, nearby=parent.position, group_id=group_id)
+                    self.last_reproduction_time[(species, group_id)] = self.game_state.time_elapsed
+                    self.game_state.add_notification(f"{species.capitalize()} group {group_id} reproduced!")
+
     def get_tourist_appeal(self):
         """Calculate the tourism appeal of the current animal population"""
         if not self.animals:
@@ -250,3 +271,21 @@ class AnimalManager:
         except Exception as e:
             print(f"Error loading animals: {str(e)}")
             return False
+        
+    def update_group_movement(self, dt):
+        group_centers = {}
+        group_members = {}
+
+        for animal in self.animals:
+            key = (animal.species, animal.group_id)
+            group_members.setdefault(key, []).append(animal)
+
+        for key, members in group_members.items():
+            if not members:
+                continue
+            avg_x = sum(a.position[0] for a in members) / len(members)
+            avg_y = sum(a.position[1] for a in members) / len(members)
+            group_centers[key] = (avg_x, avg_y)
+
+            for animal in members:
+                animal.group_center = group_centers[key]

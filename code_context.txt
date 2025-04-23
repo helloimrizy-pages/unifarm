@@ -1499,6 +1499,7 @@ class UIManager:
         self.economy_manager = economy_manager
         
         self.selected_building = None
+        self.close_button = None
         self.build_menu_active = False
         self.animal_overview_active = False
         
@@ -1678,10 +1679,10 @@ class UIManager:
             title = self.title_font.render("Animal Overview", True, WHITE)
             screen.blit(title, (panel_x + (panel_width - title.get_width()) // 2, panel_y + 10))
             
-            close_button = Button(panel_x + panel_width - 30, panel_y + 10, 20, 20, "X", RED, LIGHT_RED, 
-                                action=self.toggle_animal_overview)
-            close_button.draw(screen)
-            
+            self.close_button = Button(panel_x + panel_width - 30, panel_y + 10, 20, 20, "X", RED, LIGHT_RED, 
+                                    action=self.toggle_animal_overview)
+            self.close_button.draw(screen)
+
             species_stats = {}
             for species in self.animal_manager.species_config:
                 group = [a for a in self.animal_manager.animals if a.species == species]
@@ -1814,21 +1815,25 @@ class UIManager:
             for button in self.time_buttons:
                 if button.handle_event(event):
                     return True
-            
+
             if self.build_menu_active:
                 for button in self.build_buttons:
                     if button.handle_event(event):
                         return True
-            
+
+            if self.animal_overview_active and self.close_button:
+                if self.close_button.handle_event(event):
+                    return True
+
             if self.selected_building and not self.animal_overview_active:
                 mouse_pos = pygame.mouse.get_pos()
                 world_x = mouse_pos[0] + camera_offset[0]
                 world_y = mouse_pos[1] + camera_offset[1]
                 world_pos = (world_x, world_y)
-                
+
                 self.place_selected_building(world_pos)
                 return True
-        
+
         return False
 
 // File: vehicle.py
