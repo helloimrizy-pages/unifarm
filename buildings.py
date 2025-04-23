@@ -119,7 +119,47 @@ class BuildingManager:
                 "maintenance_cost": 50,
                 "color": color.light_gray,
                 "effectiveness": 1.0
-            }
+            },
+            "tree": {
+                "model":    "cube",
+                "texture":  "white_cube",
+                "scale":    (1, 2, 1),
+                "cost":     50,
+                "maintenance_cost": 5,
+                "color":    color.dark_gray,
+            },
+            "bush": {
+                "model":    "sphere",
+                "texture":  "white_cube",
+                "scale":    (1, 0.5, 1),
+                "cost":     30,
+                "maintenance_cost": 3,
+                "color":    color.green,
+            },
+            "flower": {
+                "model":    "quad",
+                "texture":  "white_cube",
+                "scale":    (0.5, 0.5, 0.5),
+                "cost":     20,
+                "maintenance_cost": 2,
+                "color":    color.hsv(0.8,1,1),  # a pinkish hue
+            },
+            "pond": {
+                "model":    "Plane",
+                "texture":  "white_cube",
+                "scale":    (2, 1, 2),
+                "cost":     100,
+                "maintenance_cost": 10,
+                "color":    color.rgba(0, 100, 255, 150),
+            },
+            "road": {
+                "model":    "cube",
+                "texture":  "white_cube",
+                "scale":    (1, 0.1, 1),
+                "cost":     100,
+                "maintenance_cost": 5,
+                "color":    color.brown,
+            },
         }
     
     def place_building(self, building_type, position):

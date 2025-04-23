@@ -137,14 +137,14 @@ class UIManager:
     def toggle_build_menu(self, show):
         """Show or hide the building menu"""
         if show and not self.build_menu:
+            # parent to our UI canvas
             self.build_menu = Entity(
                 parent=self.ui,
                 model='quad',
-                scale=(0.2, 0.4, 1),
-                position=(-0.4, 0, 0),
+                scale=(0.2, 0.4, 1),             # <-- 3‐component scale
+                position=(-0.4, 0, 0),           # <-- 3‐component position
                 color=color.rgba(0, 0, 0, 200)
             )
-            
             Text(
                 parent=self.build_menu,
                 text="Build Menu",
@@ -152,60 +152,42 @@ class UIManager:
                 scale=0.7,
                 color=color.white
             )
-            
-            y_pos = 0.25
+
+            y = 0.25
             spacing = 0.15
-            
-            self.feeding_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.orange,
-                tooltip=Tooltip("Feeding Station\nCost: $500"),
-                on_click=self.select_feeding_station
-            )
-            Text(parent=self.feeding_button, text="F", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.water_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.blue,
-                tooltip=Tooltip("Water Station\nCost: $400"),
-                on_click=self.select_water_station
-            )
-            Text(parent=self.water_button, text="W", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.path_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.brown,
-                tooltip=Tooltip("Path\nCost: $100"),
-                on_click=self.select_path
-            )
-            Text(parent=self.path_button, text="P", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.platform_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.gray,
-                tooltip=Tooltip("Viewing Platform\nCost: $700"),
-                on_click=self.select_viewing_platform
-            )
-            Text(parent=self.platform_button, text="V", scale=10, color=color.black)
-        
+
+            def add_button(label, col, tooltip, callback):
+                nonlocal y
+                btn = Button(
+                    parent=self.build_menu,
+                    model='cube',               # cube gives some depth
+                    scale=(0.1, 0.1, 0.1),      # 3‐component
+                    position=(0, y, 0),
+                    color=col,
+                    tooltip=Tooltip(tooltip),
+                    on_click=callback
+                )
+                Text(parent=btn, text=label, scale=2, color=color.black, position=(0,0, -0.06))
+                y -= spacing
+
+            add_button('F', color.orange,   "Feeding Station\n$500",
+                       lambda: self.building_manager.place_building("feeding_station", mouse.world_point))
+            add_button('W', color.blue,     "Water Station\n$400",
+                       lambda: self.building_manager.place_building("water_station", mouse.world_point))
+            add_button('P', color.brown,    "Path\n$100",
+                       lambda: self.building_manager.place_building("path", mouse.world_point))
+            add_button('V', color.light_gray, "Viewing Platform\n$700",
+                       lambda: self.building_manager.place_building("viewing_platform", mouse.world_point))
+
+            # FIX: point at the economy_manager we stored earlier
+            add_button('J', color.azure,    "Buy Jeep\n$1000",
+                       lambda: self.economy_manager.vehicle_manager.purchase_jeep())
+
         elif not show and self.build_menu:
             destroy(self.build_menu)
             self.build_menu = None
+
+
     
     def select_feeding_station(self):
         """Select the feeding station building type"""

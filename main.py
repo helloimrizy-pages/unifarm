@@ -6,6 +6,7 @@ from buildings  import BuildingManager
 from economy    import EconomyManager
 from ui         import UIManager
 from game_state import GameState
+from vehicles   import VehicleManager
 
 Text.default_font = 'assets/fonts/DejaVuSans.ttf'
 
@@ -29,6 +30,7 @@ def input(key):
         if key == 'v': selected_building = 'viewing_platform'
 
 def update():
+    global vehicles
     if held_keys['w']: camera_pivot.position += (0,0,camera_speed*time.dt)
     if held_keys['s']: camera_pivot.position -= (0,0,camera_speed*time.dt)
     if held_keys['a']: camera_pivot.position -= (camera_speed*time.dt,0,0)
@@ -42,13 +44,14 @@ def update():
         buildings.update(time.dt*ts)
         economy .update(time.dt*ts)
         game_state.update(time.dt*ts)
+        vehicles.update(time.dt*ts)
 
     if game_state.check_win_condition():  ui.show_win_screen()
     if game_state.check_lose_condition(): ui.show_lose_screen()
     ui.update()
 
 def main(difficulty='medium'):
-    global game_state, terrain, animals, buildings, economy, ui
+    global game_state, terrain, animals, buildings, economy, ui, vehicles
     global camera_pivot, camera_speed, rotation_speed
     global build_mode, selected_building
 
@@ -64,6 +67,9 @@ def main(difficulty='medium'):
     animals    = AnimalManager(   game_state, terrain)
     economy    = EconomyManager(  game_state, animals, buildings)
     ui         = UIManager(       game_state, animals, buildings, economy)
+    vehicles   = VehicleManager(game_state, buildings, terrain)
+    economy.vehicle_manager = vehicles
+
     animals.set_building_manager(buildings)
     animals.update_animal_stats()
 

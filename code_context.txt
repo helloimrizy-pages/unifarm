@@ -154,23 +154,26 @@ class Animal(Entity):
             wander_range = 10
             x = self.x + random.uniform(-wander_range, wander_range)
             z = self.z + random.uniform(-wander_range, wander_range)
-            
+
             if self.terrain.is_water_at_position((x, 0, z)) and self.species != "crocodile":
+                self.target_position = None
                 self.wandering = False
                 return
-            
+
             self.target_position = Vec3(x, 0, z)
             self.wandering = True
             self.wander_timer = random.uniform(5, 15)
-        
+
         if self.wandering:
             self.move_to_target(dt)
-            
+
             self.wander_timer -= dt
-            
-            if distance(self.position, self.target_position) < 1 or self.wander_timer <= 0:
+
+            if self.target_position and (distance(self.position, self.target_position) < 1 or self.wander_timer <= 0):
                 self.wandering = False
                 self.wander_timer = random.uniform(2, 5)
+
+
     
     def move_to_target(self, dt):
         """Move toward target position"""
@@ -492,7 +495,7 @@ class Building(Entity):
             self.color = color.orange
         elif building_type == "water_station":
             self.color = color.blue
-        elif building_type == "path":  # Changed from "walking_path" to "path"
+        elif building_type == "path":
             self.color = color.brown
         elif building_type == "viewing_platform":
             self.color = color.light_gray
@@ -570,7 +573,7 @@ class BuildingManager:
                 "color": color.blue,
                 "effectiveness": 1.0
             },
-            "path": {  # Changed from "walking_path" to "path"
+            "path": {
                 "model": "cube",
                 "texture": "white_cube",
                 "scale": (1, 0.2, 1),
@@ -587,7 +590,47 @@ class BuildingManager:
                 "maintenance_cost": 50,
                 "color": color.light_gray,
                 "effectiveness": 1.0
-            }
+            },
+            "tree": {
+                "model":    "cube",
+                "texture":  "white_cube",
+                "scale":    (1, 2, 1),
+                "cost":     50,
+                "maintenance_cost": 5,
+                "color":    color.dark_gray,
+            },
+            "bush": {
+                "model":    "sphere",
+                "texture":  "white_cube",
+                "scale":    (1, 0.5, 1),
+                "cost":     30,
+                "maintenance_cost": 3,
+                "color":    color.green,
+            },
+            "flower": {
+                "model":    "quad",
+                "texture":  "white_cube",
+                "scale":    (0.5, 0.5, 0.5),
+                "cost":     20,
+                "maintenance_cost": 2,
+                "color":    color.hsv(0.8,1,1),  # a pinkish hue
+            },
+            "pond": {
+                "model":    "Plane",
+                "texture":  "white_cube",
+                "scale":    (2, 1, 2),
+                "cost":     100,
+                "maintenance_cost": 10,
+                "color":    color.rgba(0, 100, 255, 150),
+            },
+            "road": {
+                "model":    "cube",
+                "texture":  "white_cube",
+                "scale":    (1, 0.1, 1),
+                "cost":     100,
+                "maintenance_cost": 5,
+                "color":    color.brown,
+            },
         }
     
     def place_building(self, building_type, position):
@@ -645,7 +688,7 @@ class BuildingManager:
         if not self.buildings:
             return 0
         
-        path_count = len([b for b in self.buildings if b.building_type == "path"])  # Changed from "walking_path" to "path"
+        path_count = len([b for b in self.buildings if b.building_type == "path"])
         platform_count = len([b for b in self.buildings if b.building_type == "viewing_platform"])
         
         base_score = min(80, path_count * 5 + platform_count * 15)
@@ -851,7 +894,6 @@ class Tourist(Entity):
         self.manager.add_review(review_score)
         
         destroy(self)
-
 
 class EconomyManager:
     def __init__(self, game_state, animal_manager, building_manager):
@@ -1148,6 +1190,7 @@ from buildings  import BuildingManager
 from economy    import EconomyManager
 from ui         import UIManager
 from game_state import GameState
+from vehicles   import VehicleManager
 
 Text.default_font = 'assets/fonts/DejaVuSans.ttf'
 
@@ -1171,6 +1214,7 @@ def input(key):
         if key == 'v': selected_building = 'viewing_platform'
 
 def update():
+    global vehicles
     if held_keys['w']: camera_pivot.position += (0,0,camera_speed*time.dt)
     if held_keys['s']: camera_pivot.position -= (0,0,camera_speed*time.dt)
     if held_keys['a']: camera_pivot.position -= (camera_speed*time.dt,0,0)
@@ -1184,13 +1228,14 @@ def update():
         buildings.update(time.dt*ts)
         economy .update(time.dt*ts)
         game_state.update(time.dt*ts)
+        vehicles.update(time.dt*ts)
 
     if game_state.check_win_condition():  ui.show_win_screen()
     if game_state.check_lose_condition(): ui.show_lose_screen()
     ui.update()
 
 def main(difficulty='medium'):
-    global game_state, terrain, animals, buildings, economy, ui
+    global game_state, terrain, animals, buildings, economy, ui, vehicles
     global camera_pivot, camera_speed, rotation_speed
     global build_mode, selected_building
 
@@ -1202,10 +1247,15 @@ def main(difficulty='medium'):
 
     game_state = GameState(difficulty)
     terrain    = TerrainGenerator(game_state)
-    animals    = AnimalManager(   game_state, terrain)
     buildings  = BuildingManager( game_state, terrain)
+    animals    = AnimalManager(   game_state, terrain)
     economy    = EconomyManager(  game_state, animals, buildings)
     ui         = UIManager(       game_state, animals, buildings, economy)
+    vehicles   = VehicleManager(game_state, buildings, terrain)
+    economy.vehicle_manager = vehicles
+
+    animals.set_building_manager(buildings)
+    animals.update_animal_stats()
 
     camera_pivot = Entity()
     camera.parent      = camera_pivot
@@ -1223,7 +1273,6 @@ def main(difficulty='medium'):
 if __name__ == '__main__':
     import sys
     main(sys.argv[1].lower() if len(sys.argv)>1 else 'medium')
-
 // File: ui.py
 from ursina import *
 from ursina.prefabs.dropdown_menu import DropdownMenu
@@ -1364,14 +1413,14 @@ class UIManager:
     def toggle_build_menu(self, show):
         """Show or hide the building menu"""
         if show and not self.build_menu:
+            # parent to our UI canvas
             self.build_menu = Entity(
                 parent=self.ui,
                 model='quad',
-                scale=(0.2, 0.4, 1),
-                position=(-0.4, 0, 0),
+                scale=(0.2, 0.4, 1),             # <-- 3‐component scale
+                position=(-0.4, 0, 0),           # <-- 3‐component position
                 color=color.rgba(0, 0, 0, 200)
             )
-            
             Text(
                 parent=self.build_menu,
                 text="Build Menu",
@@ -1379,60 +1428,42 @@ class UIManager:
                 scale=0.7,
                 color=color.white
             )
-            
-            y_pos = 0.25
+
+            y = 0.25
             spacing = 0.15
-            
-            self.feeding_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.orange,
-                tooltip=Tooltip("Feeding Station\nCost: $500"),
-                on_click=self.select_feeding_station
-            )
-            Text(parent=self.feeding_button, text="F", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.water_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.blue,
-                tooltip=Tooltip("Water Station\nCost: $400"),
-                on_click=self.select_water_station
-            )
-            Text(parent=self.water_button, text="W", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.path_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.brown,
-                tooltip=Tooltip("Path\nCost: $100"),
-                on_click=self.select_path
-            )
-            Text(parent=self.path_button, text="P", scale=10, color=color.black)
-            y_pos -= spacing
-            
-            self.platform_button = Button(
-                parent=self.build_menu,
-                model='cube',
-                scale=0.1,
-                position=(0, y_pos, 0),
-                color=color.gray,
-                tooltip=Tooltip("Viewing Platform\nCost: $700"),
-                on_click=self.select_viewing_platform
-            )
-            Text(parent=self.platform_button, text="V", scale=10, color=color.black)
-        
+
+            def add_button(label, col, tooltip, callback):
+                nonlocal y
+                btn = Button(
+                    parent=self.build_menu,
+                    model='cube',               # cube gives some depth
+                    scale=(0.1, 0.1, 0.1),      # 3‐component
+                    position=(0, y, 0),
+                    color=col,
+                    tooltip=Tooltip(tooltip),
+                    on_click=callback
+                )
+                Text(parent=btn, text=label, scale=2, color=color.black, position=(0,0, -0.06))
+                y -= spacing
+
+            add_button('F', color.orange,   "Feeding Station\n$500",
+                       lambda: self.building_manager.place_building("feeding_station", mouse.world_point))
+            add_button('W', color.blue,     "Water Station\n$400",
+                       lambda: self.building_manager.place_building("water_station", mouse.world_point))
+            add_button('P', color.brown,    "Path\n$100",
+                       lambda: self.building_manager.place_building("path", mouse.world_point))
+            add_button('V', color.light_gray, "Viewing Platform\n$700",
+                       lambda: self.building_manager.place_building("viewing_platform", mouse.world_point))
+
+            # FIX: point at the economy_manager we stored earlier
+            add_button('J', color.azure,    "Buy Jeep\n$1000",
+                       lambda: self.economy_manager.vehicle_manager.purchase_jeep())
+
         elif not show and self.build_menu:
             destroy(self.build_menu)
             self.build_menu = None
+
+
     
     def select_feeding_station(self):
         """Select the feeding station building type"""
@@ -1494,7 +1525,23 @@ class UIManager:
         destroy(self.animal_content)
         self.animal_content = Entity(parent=self.animal_overview)
         
-        species_stats = self.game_state.animal_stats
+        species_stats = {}
+        for species in self.animal_manager.species_config:
+            group = [a for a in self.animal_manager.animals if a.species == species]
+            pop = len(group)
+            if pop:
+                avg_health = sum(a.health for a in group) / pop
+                avg_hunger = sum(a.hunger for a in group) / pop
+                avg_thirst = sum(a.thirst for a in group) / pop
+            else:
+                avg_health = avg_hunger = avg_thirst = 0
+            species_stats[species] = {
+                "population": pop,
+                "avg_health": avg_health,
+                "avg_hunger": avg_hunger,
+                "avg_thirst": avg_thirst
+            }
+
         
         y_pos = 0.3
         spacing = 0.15

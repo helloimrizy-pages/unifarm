@@ -144,7 +144,6 @@ class Tourist(Entity):
         
         destroy(self)
 
-
 class EconomyManager:
     def __init__(self, game_state, animal_manager, building_manager):
         self.game_state = game_state
