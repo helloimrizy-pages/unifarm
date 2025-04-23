@@ -153,23 +153,26 @@ class Animal(Entity):
             wander_range = 10
             x = self.x + random.uniform(-wander_range, wander_range)
             z = self.z + random.uniform(-wander_range, wander_range)
-            
+
             if self.terrain.is_water_at_position((x, 0, z)) and self.species != "crocodile":
+                self.target_position = None
                 self.wandering = False
                 return
-            
+
             self.target_position = Vec3(x, 0, z)
             self.wandering = True
             self.wander_timer = random.uniform(5, 15)
-        
+
         if self.wandering:
             self.move_to_target(dt)
-            
+
             self.wander_timer -= dt
-            
-            if distance(self.position, self.target_position) < 1 or self.wander_timer <= 0:
+
+            if self.target_position and (distance(self.position, self.target_position) < 1 or self.wander_timer <= 0):
                 self.wandering = False
                 self.wander_timer = random.uniform(2, 5)
+
+
     
     def move_to_target(self, dt):
         """Move toward target position"""

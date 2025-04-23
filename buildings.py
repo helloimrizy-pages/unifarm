@@ -24,7 +24,7 @@ class Building(Entity):
             self.color = color.orange
         elif building_type == "water_station":
             self.color = color.blue
-        elif building_type == "path":  # Changed from "walking_path" to "path"
+        elif building_type == "path":
             self.color = color.brown
         elif building_type == "viewing_platform":
             self.color = color.light_gray
@@ -102,7 +102,7 @@ class BuildingManager:
                 "color": color.blue,
                 "effectiveness": 1.0
             },
-            "path": {  # Changed from "walking_path" to "path"
+            "path": {
                 "model": "cube",
                 "texture": "white_cube",
                 "scale": (1, 0.2, 1),
@@ -177,7 +177,7 @@ class BuildingManager:
         if not self.buildings:
             return 0
         
-        path_count = len([b for b in self.buildings if b.building_type == "path"])  # Changed from "walking_path" to "path"
+        path_count = len([b for b in self.buildings if b.building_type == "path"])
         platform_count = len([b for b in self.buildings if b.building_type == "viewing_platform"])
         
         base_score = min(80, path_count * 5 + platform_count * 15)

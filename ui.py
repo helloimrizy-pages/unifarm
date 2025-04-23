@@ -267,7 +267,23 @@ class UIManager:
         destroy(self.animal_content)
         self.animal_content = Entity(parent=self.animal_overview)
         
-        species_stats = self.game_state.animal_stats
+        species_stats = {}
+        for species in self.animal_manager.species_config:
+            group = [a for a in self.animal_manager.animals if a.species == species]
+            pop = len(group)
+            if pop:
+                avg_health = sum(a.health for a in group) / pop
+                avg_hunger = sum(a.hunger for a in group) / pop
+                avg_thirst = sum(a.thirst for a in group) / pop
+            else:
+                avg_health = avg_hunger = avg_thirst = 0
+            species_stats[species] = {
+                "population": pop,
+                "avg_health": avg_health,
+                "avg_hunger": avg_hunger,
+                "avg_thirst": avg_thirst
+            }
+
         
         y_pos = 0.3
         spacing = 0.15

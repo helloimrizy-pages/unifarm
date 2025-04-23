@@ -60,10 +60,12 @@ def main(difficulty='medium'):
 
     game_state = GameState(difficulty)
     terrain    = TerrainGenerator(game_state)
-    animals    = AnimalManager(   game_state, terrain)
     buildings  = BuildingManager( game_state, terrain)
+    animals    = AnimalManager(   game_state, terrain)
     economy    = EconomyManager(  game_state, animals, buildings)
     ui         = UIManager(       game_state, animals, buildings, economy)
+    animals.set_building_manager(buildings)
+    animals.update_animal_stats()
 
     camera_pivot = Entity()
     camera.parent      = camera_pivot
