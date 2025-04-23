@@ -1,6 +1,6 @@
-import json
-import os
+import pygame
 from datetime import datetime
+from constants import *
 
 class GameState:
     def __init__(self, difficulty="medium"):
@@ -15,7 +15,7 @@ class GameState:
         self.animal_stats = {}
         self.ecosystem_balance = 100
         self.notifications = []
-        
+    
     def load_difficulty_settings(self):
         self.settings = {
             "easy": {
@@ -123,7 +123,7 @@ class GameState:
     
     def load_game(self, filename="savegame.json"):
         """Load game state from a file"""
-        if not os.path.exists(filename):
+        if not path.exists(filename):
             self.add_notification(f"Save file {filename} not found")
             return False
         

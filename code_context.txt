@@ -1,244 +1,20 @@
-// File: animals.py
-from ursina import *
+// File: animal_manager.py
+import pygame
 import random
-import json
-import math
-
-class Animal(Entity):
-    def __init__(self, species, position, terrain, animal_manager):
-        config = animal_manager.species_config[species]
-        
-        super().__init__(
-            model=config['model'],
-            texture=config['texture'],
-            scale=config['scale'],
-            position=position,
-            collider='box',
-            name=f"{species}_{id(self)}"
-        )
-        
-        self.species = species
-        self.terrain = terrain
-        self.manager = animal_manager
-        self.game_state = animal_manager.game_state
-        self.age = random.uniform(0.2, 1.0)
-        self.speed = config['speed'] * self.age
-        
-        self.hunger = random.randint(50, 80)
-        self.thirst = random.randint(50, 80)
-        self.health = random.randint(70, 100)
-        self.energy = random.randint(70, 100)
-        
-        self.state = "idle"
-        self.target = None
-        self.target_position = None
-        self.wandering = False
-        self.wander_timer = 0
-        self.need_threshold = 70
-        
-        self.need_rate = self.game_state.difficulty_settings["animal_need_rate"]
-    
-    def step(self, dt):
-        """Update animal state and perform actions"""
-        self.hunger += 0.5 * dt * self.need_rate
-        self.thirst += 0.7 * dt * self.need_rate
-        self.energy -= 0.3 * dt
-        
-        self.hunger = min(100, self.hunger)
-        self.thirst = min(100, self.thirst)
-        self.energy = min(100, self.energy)
-        
-        if self.hunger > 90 or self.thirst > 90:
-            self.health -= 0.5 * dt
-        else:
-            self.health = min(100, self.health + 0.1 * dt)
-        
-        self.decide_action()
-        
-        if self.state == "seeking_food":
-            self.seek_food(dt)
-        elif self.state == "seeking_water":
-            self.seek_water(dt)
-        elif self.state == "resting":
-            self.rest(dt)
-        else:
-            self.wander(dt)
-    
-    def decide_action(self):
-        """Decide what action to take based on current needs"""
-        if self.health < 20:
-            if self.hunger > self.thirst:
-                self.state = "seeking_food"
-            else:
-                self.state = "seeking_water"
-            return
-        
-        if self.energy < 20:
-            self.state = "resting"
-            return
-        
-        if self.hunger > self.need_threshold:
-            self.state = "seeking_food"
-        elif self.thirst > self.need_threshold:
-            self.state = "seeking_water"
-        elif not self.wandering:
-            self.state = "idle"
-    
-    def seek_food(self, dt):
-        """Seek out food sources"""
-        if not self.target or self.target.name != "feeding_station":
-            feeding_stations = [b for b in self.manager.buildings.buildings 
-                               if b.building_type == "feeding_station"]
-            
-            if feeding_stations:
-                closest = min(feeding_stations, key=lambda b: distance(self, b))
-                self.target = closest
-                self.target_position = closest.position
-            else:
-                grass_locations = self.find_grass_locations()
-                if grass_locations:
-                    self.target_position = random.choice(grass_locations)
-                else:
-                    self.state = "idle"
-                    return
-        
-        if self.target_position:
-            self.move_to_target(dt)
-            
-            if distance(self.position, self.target_position) < 2:
-                self.hunger = max(0, self.hunger - 30)
-                self.state = "idle"
-                self.target = None
-                self.target_position = None
-    
-    def seek_water(self, dt):
-        """Seek out water sources"""
-        if not self.target or (self.target.name != "water_station" and self.target.name != "water"):
-            water_stations = [b for b in self.manager.buildings.buildings 
-                             if b.building_type == "water_station"]
-            
-            if water_stations:
-                closest = min(water_stations, key=lambda b: distance(self, b))
-                self.target = closest
-                self.target_position = closest.position
-            else:
-                water_locations = self.find_water_locations()
-                if water_locations:
-                    self.target_position = random.choice(water_locations)
-                    self.target = Entity(position=self.target_position, name="water")
-                else:
-                    self.state = "idle"
-                    return
-        
-        if self.target_position:
-            self.move_to_target(dt)
-            
-            if distance(self.position, self.target_position) < 2:
-                self.thirst = max(0, self.thirst - 40)
-                self.state = "idle"
-                self.target = None
-                self.target_position = None
-    
-    def rest(self, dt):
-        """Rest to regain energy"""
-        self.wandering = False
-        
-        self.energy += 1.0 * dt
-        
-        if self.energy > 80:
-            self.state = "idle"
-    
-    def wander(self, dt):
-        """Wander around aimlessly"""
-        if not self.wandering:
-            wander_range = 10
-            x = self.x + random.uniform(-wander_range, wander_range)
-            z = self.z + random.uniform(-wander_range, wander_range)
-
-            if self.terrain.is_water_at_position((x, 0, z)) and self.species != "crocodile":
-                self.target_position = None
-                self.wandering = False
-                return
-
-            self.target_position = Vec3(x, 0, z)
-            self.wandering = True
-            self.wander_timer = random.uniform(5, 15)
-
-        if self.wandering:
-            self.move_to_target(dt)
-
-            self.wander_timer -= dt
-
-            if self.target_position and (distance(self.position, self.target_position) < 1 or self.wander_timer <= 0):
-                self.wandering = False
-                self.wander_timer = random.uniform(2, 5)
-
-
-    
-    def move_to_target(self, dt):
-        """Move toward target position"""
-        if not self.target_position:
-            return
-        
-        direction = self.target_position - self.position
-        
-        target_y = self.terrain.get_height_at_position(self.target_position)
-        self.target_position = Vec3(self.target_position.x, target_y, self.target_position.z)
-        
-        if direction.length() > 0:
-            direction = direction.normalized()
-        
-        speed = self.speed * dt
-        self.position += direction * speed
-        
-        terrain_height = self.terrain.get_height_at_position(self.position)
-        self.y = terrain_height
-        
-        if direction.length() > 0:
-            self.look_at(self.position + direction)
-            self.rotation_x = 0
-    
-    def find_grass_locations(self):
-        """Find suitable grass locations for food"""
-        grass_locations = []
-        
-        search_radius = 20
-        for x in range(-search_radius, search_radius + 1, 5):
-            for z in range(-search_radius, search_radius + 1, 5):
-                pos = Vec3(self.x + x, 0, self.z + z)
-                if self.terrain.get_terrain_type_at_position(pos) == "grass":
-                    pos.y = self.terrain.get_height_at_position(pos)
-                    grass_locations.append(pos)
-        
-        return grass_locations
-    
-    def find_water_locations(self):
-        """Find suitable water locations for drinking"""
-        water_locations = []
-        
-        search_radius = 30
-        for x in range(-search_radius, search_radius + 1, 5):
-            for z in range(-search_radius, search_radius + 1, 5):
-                pos = Vec3(self.x + x, 0, self.z + z)
-                if self.terrain.is_water_at_position(pos):
-                    pos.y = self.terrain.get_height_at_position(pos)
-                    water_locations.append(pos)
-        
-        return water_locations
-
+from animal import Animal
+from constants import *
 
 class AnimalManager:
     def __init__(self, game_state, terrain):
         self.game_state = game_state
         self.terrain = terrain
         self.animals = []
+        self.animals_group = pygame.sprite.Group()
         self.buildings = None
         
         self.species_config = {
             "elephant": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (2, 2, 3),
+                "scale": (1.5, 1.5),
                 "speed": 3.0,
                 "preferred_terrain": "grass",
                 "food_consumption": 2.0,
@@ -246,9 +22,7 @@ class AnimalManager:
                 "tourist_appeal": 3.0
             },
             "lion": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (1, 1, 2),
+                "scale": (1.0, 1.0),
                 "speed": 5.0,
                 "preferred_terrain": "grass",
                 "food_consumption": 1.5,
@@ -256,9 +30,7 @@ class AnimalManager:
                 "tourist_appeal": 3.5
             },
             "zebra": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (1, 1.5, 2),
+                "scale": (1.2, 0.8),
                 "speed": 4.0,
                 "preferred_terrain": "grass",
                 "food_consumption": 1.0,
@@ -268,9 +40,9 @@ class AnimalManager:
         }
         
         self.species_colors = {
-            "elephant": color.gray,
-            "lion": color.yellow,
-            "zebra": color.white
+            "elephant": GRAY,
+            "lion": YELLOW,
+            "zebra": WHITE
         }
         
         self.initial_population = {
@@ -296,32 +68,30 @@ class AnimalManager:
         spawn_position = self.find_spawn_position(species)
         
         animal = Animal(species, spawn_position, self.terrain, self)
-        animal.color = self.species_colors[species]
         
         self.animals.append(animal)
+        self.animals_group.add(animal)
         
         return animal
     
     def find_spawn_position(self, species):
         """Find a suitable spawn position for the given species"""
-        size = self.terrain.size
+        size = self.terrain.size * TILE_SIZE
         max_attempts = 50
         
         for _ in range(max_attempts):
             x = random.uniform(-size/2, size/2)
-            z = random.uniform(-size/2, size/2)
-            pos = Vec3(x, 0, z)
+            y = random.uniform(-size/2, size/2)
+            pos = (x, y)
             
-            terrain_type = self.terrain.get_terrain_type_at_position(pos)
+            terrain_type = self.terrain.get_terrain_at_position(pos)
             
             if species == "crocodile" and terrain_type == "water":
-                pos.y = self.terrain.get_height_at_position(pos)
                 return pos
             elif terrain_type == "grass":
-                pos.y = self.terrain.get_height_at_position(pos)
                 return pos
         
-        return Vec3(0, 1, 0)
+        return (0, 0)
     
     def update(self, dt):
         """Update all animals"""
@@ -339,7 +109,7 @@ class AnimalManager:
         """Remove an animal from the simulation"""
         if animal in self.animals:
             self.animals.remove(animal)
-            destroy(animal)
+            self.animals_group.remove(animal)
     
     def update_animal_stats(self):
         """Update game state with statistics about animal populations"""
@@ -408,6 +178,34 @@ class AnimalManager:
         
         return min(100, total_appeal)
     
+    def render(self, screen, camera_offset):
+        """Render all animals with camera offset"""
+        for animal in self.animals:
+            screen_pos = (animal.position[0] - camera_offset[0], 
+                         animal.position[1] - camera_offset[1])
+            
+            if (screen_pos[0] < -100 or screen_pos[0] > SCREEN_WIDTH + 100 or
+                screen_pos[1] < -100 or screen_pos[1] > SCREEN_HEIGHT + 100):
+                continue
+            
+            rect = animal.image.get_rect()
+            rect.center = screen_pos
+            
+            screen.blit(animal.image, rect)
+            
+            if animal.health < 70:
+                bar_width = animal.rect.width
+                bar_height = 4
+                bar_pos = (screen_pos[0] - bar_width/2, screen_pos[1] - animal.rect.height/2 - 10)
+                
+                pygame.draw.rect(screen, BLACK, 
+                               (bar_pos[0], bar_pos[1], bar_width, bar_height))
+                
+                health_width = max(0, bar_width * animal.health / 100)
+                health_color = GREEN if animal.health > 50 else YELLOW if animal.health > 25 else RED
+                pygame.draw.rect(screen, health_color, 
+                               (bar_pos[0], bar_pos[1], health_width, bar_height))
+    
     def save_animals(self, filename="animals.json"):
         """Save animal data to a file"""
         animal_data = []
@@ -415,7 +213,7 @@ class AnimalManager:
         for animal in self.animals:
             data = {
                 "species": animal.species,
-                "position": [animal.x, animal.y, animal.z],
+                "position": [animal.position[0], animal.position[1]],
                 "hunger": animal.hunger,
                 "thirst": animal.thirst,
                 "health": animal.health,
@@ -439,71 +237,315 @@ class AnimalManager:
                 self.remove_animal(animal)
             
             for data in animal_data:
-                pos = Vec3(*data["position"])
+                pos = (data["position"][0], data["position"][1])
                 animal = Animal(data["species"], pos, self.terrain, self)
                 animal.hunger = data["hunger"]
                 animal.thirst = data["thirst"]
                 animal.health = data["health"]
                 animal.energy = data["energy"]
                 animal.state = data["state"]
-                animal.color = self.species_colors[data["species"]]
                 self.animals.append(animal)
+                self.animals_group.add(animal)
             
             return True
         except Exception as e:
             print(f"Error loading animals: {str(e)}")
             return False
 
-
-def distance(a, b):
-    """Calculate distance between two entities or positions"""
-    if hasattr(a, 'position'):
-        pos_a = a.position
-    else:
-        pos_a = a
-    
-    if hasattr(b, 'position'):
-        pos_b = b.position
-    else:
-        pos_b = b
-    
-    return math.sqrt((pos_a.x - pos_b.x)**2 + (pos_a.z - pos_b.z)**2)
-// File: buildings.py
-from ursina import *
-import json
+// File: animal.py
+import pygame
+import random
 import math
+from constants import *
+from utils import distance
 
-class Building(Entity):
+class Animal(pygame.sprite.Sprite):
+    def __init__(self, species, position, terrain, animal_manager):
+        super().__init__()
+        
+        config = animal_manager.species_config[species]
+        
+        width = int(config['scale'][0] * TILE_SIZE)
+        height = int(config['scale'][1] * TILE_SIZE)
+        
+        self.base_image = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.base_image.fill(animal_manager.species_colors[species])
+        
+        pygame.draw.circle(self.base_image, BLACK, 
+                          (int(width * 0.7), int(height * 0.5)), 
+                          int(width * 0.15))
+        
+        self.image = self.base_image.copy()
+        self.rect = self.image.get_rect()
+        self.rect.center = position
+        
+        self.species = species
+        self.position = position
+        self.terrain = terrain
+        self.manager = animal_manager
+        self.game_state = animal_manager.game_state
+        self.age = random.uniform(0.2, 1.0)
+        self.speed = config['speed'] * self.age * (TILE_SIZE / 32)
+        
+        self.hunger = random.randint(50, 80)
+        self.thirst = random.randint(50, 80)
+        self.health = random.randint(70, 100)
+        self.energy = random.randint(70, 100)
+        
+        self.state = "idle"
+        self.target = None
+        self.target_position = None
+        self.wandering = False
+        self.wander_timer = 0
+        self.need_threshold = 70
+        
+        self.rotation = 0
+        
+        self.need_rate = self.game_state.difficulty_settings["animal_need_rate"]
+    
+    def step(self, dt):
+        """Update animal state and perform actions"""
+        self.hunger += 0.5 * dt * self.need_rate
+        self.thirst += 0.7 * dt * self.need_rate
+        self.energy -= 0.3 * dt
+        
+        self.hunger = min(100, self.hunger)
+        self.thirst = min(100, self.thirst)
+        self.energy = min(100, self.energy)
+        
+        if self.hunger > 90 or self.thirst > 90:
+            self.health -= 0.5 * dt
+        else:
+            self.health = min(100, self.health + 0.1 * dt)
+        
+        self.decide_action()
+        
+        if self.state == "seeking_food":
+            self.seek_food(dt)
+        elif self.state == "seeking_water":
+            self.seek_water(dt)
+        elif self.state == "resting":
+            self.rest(dt)
+        else:
+            self.wander(dt)
+        
+        self.rect.center = self.position
+    
+    def decide_action(self):
+        """Decide what action to take based on current needs"""
+        if self.health < 20:
+            if self.hunger > self.thirst:
+                self.state = "seeking_food"
+            else:
+                self.state = "seeking_water"
+            return
+        
+        if self.energy < 20:
+            self.state = "resting"
+            return
+        
+        if self.hunger > self.need_threshold:
+            self.state = "seeking_food"
+        elif self.thirst > self.need_threshold:
+            self.state = "seeking_water"
+        elif not self.wandering:
+            self.state = "idle"
+    
+    def seek_food(self, dt):
+        """Seek out food sources"""
+        if not self.is_feeding_station(self.target):
+            feeding_stations = [b for b in self.manager.buildings.buildings 
+                               if b.building_type == "feeding_station"]
+            
+            if feeding_stations:
+                closest = min(feeding_stations, key=lambda b: distance(self.position, b.position))
+                self.target = closest
+                self.target_position = closest.position
+            else:
+                grass_locations = self.find_grass_locations()
+                if grass_locations:
+                    self.target_position = random.choice(grass_locations)
+                else:
+                    self.state = "idle"
+                    return
+        
+        if self.target_position:
+            self.move_to_target(dt)
+            
+            if distance(self.position, self.target_position) < TILE_SIZE * 2:
+                self.hunger = max(0, self.hunger - 30)
+                self.state = "idle"
+                self.target = None
+                self.target_position = None
+
+    @staticmethod
+    def is_water_station(target):
+        try:
+            return getattr(target, "building_type", None) == "water_station" or \
+                (isinstance(target, dict) and target.get("building_type") == "water_station")
+        except:
+            return False
+
+    @staticmethod
+    def is_feeding_station(target):
+        try:
+            return getattr(target, "building_type", None) == "feeding_station" or \
+                (isinstance(target, dict) and target.get("building_type") == "feeding_station")
+        except:
+            return False
+        
+    def seek_water(self, dt):
+        """Seek out water sources"""
+        if not self.is_water_station(self.target):
+            water_stations = [b for b in self.manager.buildings.buildings 
+                             if b.building_type == "water_station"]
+            
+            if water_stations:
+                closest = min(water_stations, key=lambda b: distance(self.position, b.position))
+                self.target = closest
+                self.target_position = closest.position
+            else:
+                water_locations = self.find_water_locations()
+                if water_locations:
+                    self.target_position = random.choice(water_locations)
+                    self.target = {'position': self.target_position, 'building_type': 'water_natural'}
+                else:
+                    self.state = "idle"
+                    return
+        
+        if self.target_position:
+            self.move_to_target(dt)
+            
+            if distance(self.position, self.target_position) < TILE_SIZE * 2:
+                self.thirst = max(0, self.thirst - 40)
+                self.state = "idle"
+                self.target = None
+                self.target_position = None
+    
+    def rest(self, dt):
+        """Rest to regain energy"""
+        self.wandering = False
+        
+        self.energy += 1.0 * dt
+        
+        if self.energy > 80:
+            self.state = "idle"
+    
+    def wander(self, dt):
+        """Wander around aimlessly"""
+        if not self.wandering:
+            wander_range = 10 * TILE_SIZE
+            x = self.position[0] + random.uniform(-wander_range, wander_range)
+            y = self.position[1] + random.uniform(-wander_range, wander_range)
+
+            if self.terrain.is_water_at_position((x, y)) and self.species != "crocodile":
+                self.target_position = None
+                self.wandering = False
+                return
+
+            self.target_position = (x, y)
+            self.wandering = True
+            self.wander_timer = random.uniform(5, 15)
+
+        if self.wandering:
+            self.move_to_target(dt)
+
+            self.wander_timer -= dt
+
+            if self.target_position and (distance(self.position, self.target_position) < TILE_SIZE or self.wander_timer <= 0):
+                self.wandering = False
+                self.wander_timer = random.uniform(2, 5)
+    
+    def move_to_target(self, dt):
+        """Move toward target position"""
+        if not self.target_position:
+            return
+        
+        direction_x = self.target_position[0] - self.position[0]
+        direction_y = self.target_position[1] - self.position[1]
+        
+        dir_length = math.sqrt(direction_x**2 + direction_y**2)
+        if dir_length > 0:
+            direction_x = direction_x / dir_length
+            direction_y = direction_y / dir_length
+        
+        speed = self.speed * dt
+        
+        move_x = direction_x * speed
+        move_y = direction_y * speed
+        
+        new_pos = (self.position[0] + move_x, self.position[1] + move_y)
+        
+        if (self.terrain.is_water_at_position(new_pos) and 
+            self.species != "crocodile" and 
+            self.state != "seeking_water"):
+            pass
+        else:
+            self.position = new_pos
+        
+        if dir_length > 0:
+            self.rotation = math.degrees(math.atan2(direction_y, direction_x))
+            
+            self.image = pygame.transform.rotate(self.base_image, -self.rotation + 90)
+    
+    def find_grass_locations(self):
+        """Find suitable grass locations for food"""
+        grass_locations = []
+        
+        search_radius = 20 * TILE_SIZE
+        step = 5 * TILE_SIZE
+        
+        for x_offset in range(-int(search_radius), int(search_radius) + 1, int(step)):
+            for y_offset in range(-int(search_radius), int(search_radius) + 1, int(step)):
+                pos = (self.position[0] + x_offset, self.position[1] + y_offset)
+                if self.terrain.get_terrain_at_position(pos) == "grass":
+                    grass_locations.append(pos)
+        
+        return grass_locations
+    
+    def find_water_locations(self):
+        """Find suitable water locations for drinking"""
+        water_locations = []
+        
+        search_radius = 30 * TILE_SIZE
+        step = 5 * TILE_SIZE
+        
+        for x_offset in range(-int(search_radius), int(search_radius) + 1, int(step)):
+            for y_offset in range(-int(search_radius), int(search_radius) + 1, int(step)):
+                pos = (self.position[0] + x_offset, self.position[1] + y_offset)
+                if self.terrain.is_water_at_position(pos):
+                    water_locations.append(pos)
+        
+        return water_locations
+
+
+// File: building.py
+import pygame
+from constants import *
+
+class Building(pygame.sprite.Sprite):
     def __init__(self, building_type, position, building_manager):
+        super().__init__()
+        
         config = building_manager.building_config[building_type]
         
-        super().__init__(
-            model=config['model'],
-            texture=config['texture'],
-            scale=config['scale'],
-            position=position,
-            collider='box',
-            name=f"{building_type}_{id(self)}"
-        )
+        width = int(config['scale'][0] * TILE_SIZE)
+        height = int(config['scale'][1] * TILE_SIZE)
+        
+        self.image = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.image.fill(config['color'])
+        
+        self.rect = self.image.get_rect()
+        self.rect.center = position
         
         self.building_type = building_type
+        self.position = position
         self.game_state = building_manager.game_state
         self.building_manager = building_manager
         self.terrain = building_manager.terrain
         
-        if building_type == "feeding_station":
-            self.color = color.orange
-        elif building_type == "water_station":
-            self.color = color.blue
-        elif building_type == "path":
-            self.color = color.brown
-        elif building_type == "viewing_platform":
-            self.color = color.light_gray
-        
         self.health = 100
         self.last_maintenance = 0
-        
-        self.y = self.terrain.get_height_at_position(position)
         
         building_manager.buildings.append(self)
         
@@ -519,14 +561,20 @@ class Building(Entity):
             if self.building_type == "feeding_station":
                 self.health -= 0.2 * dt
         
-        terrain_type = self.terrain.get_terrain_type_at_position(self.position)
+        terrain_type = self.terrain.get_terrain_at_position(self.position)
         if terrain_type == "water":
             self.health -= 0.3 * dt
         
         self.health = max(0, self.health)
         
         if self.health < 30:
-            self.color = color.lerp(self.color, color.red, 0.5)
+            config = self.building_manager.building_config[self.building_type]
+            base_color = config['color']
+            new_color = lerp_color(base_color, RED, 0.5)
+            
+            width, height = self.image.get_size()
+            self.image = pygame.Surface((width, height), pygame.SRCALPHA)
+            self.image.fill(new_color)
     
     def perform_maintenance(self):
         """Perform maintenance on the building"""
@@ -539,7 +587,10 @@ class Building(Entity):
             self.health = 100
             
             config = self.building_manager.building_config[self.building_type]
-            self.color = config['color']
+            
+            width, height = self.image.get_size()
+            self.image = pygame.Surface((width, height), pygame.SRCALPHA)
+            self.image.fill(config['color'])
             
             self.game_state.add_notification(f"Repaired {self.building_type} for ${cost:.2f}")
             return True
@@ -547,353 +598,60 @@ class Building(Entity):
             self.game_state.add_notification(f"Not enough funds to repair {self.building_type}")
             return False
 
-
-class BuildingManager:
-    def __init__(self, game_state, terrain):
-        self.game_state = game_state
-        self.terrain = terrain
-        self.buildings = []
-        
-        self.building_config = {
-            "feeding_station": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (2, 1, 2),
-                "cost": 500,
-                "maintenance_cost": 50,
-                "color": color.orange,
-                "effectiveness": 1.0
-            },
-            "water_station": {
-                "model": "cylinder",
-                "texture": "white_cube",
-                "scale": (2, 0.5, 2),
-                "cost": 400,
-                "maintenance_cost": 40,
-                "color": color.blue,
-                "effectiveness": 1.0
-            },
-            "path": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (1, 0.2, 1),
-                "cost": 100,
-                "maintenance_cost": 10,
-                "color": color.brown,
-                "effectiveness": 1.0
-            },
-            "viewing_platform": {
-                "model": "cube",
-                "texture": "white_cube",
-                "scale": (3, 1, 3),
-                "cost": 700,
-                "maintenance_cost": 50,
-                "color": color.light_gray,
-                "effectiveness": 1.0
-            },
-            "tree": {
-                "model":    "cube",
-                "texture":  "white_cube",
-                "scale":    (1, 2, 1),
-                "cost":     50,
-                "maintenance_cost": 5,
-                "color":    color.dark_gray,
-            },
-            "bush": {
-                "model":    "sphere",
-                "texture":  "white_cube",
-                "scale":    (1, 0.5, 1),
-                "cost":     30,
-                "maintenance_cost": 3,
-                "color":    color.green,
-            },
-            "flower": {
-                "model":    "quad",
-                "texture":  "white_cube",
-                "scale":    (0.5, 0.5, 0.5),
-                "cost":     20,
-                "maintenance_cost": 2,
-                "color":    color.hsv(0.8,1,1),  # a pinkish hue
-            },
-            "pond": {
-                "model":    "Plane",
-                "texture":  "white_cube",
-                "scale":    (2, 1, 2),
-                "cost":     100,
-                "maintenance_cost": 10,
-                "color":    color.rgba(0, 100, 255, 150),
-            },
-            "road": {
-                "model":    "cube",
-                "texture":  "white_cube",
-                "scale":    (1, 0.1, 1),
-                "cost":     100,
-                "maintenance_cost": 5,
-                "color":    color.brown,
-            },
-        }
-    
-    def place_building(self, building_type, position):
-        """Place a new building at the specified position"""
-        cost = self.building_config[building_type]["cost"]
-        if self.game_state.funds < cost:
-            self.game_state.add_notification(f"Not enough funds to build {building_type}")
-            return None
-        
-        if not self.terrain.is_suitable_for_building(position):
-            self.game_state.add_notification(f"Cannot build {building_type} on this terrain")
-            return None
-        
-        if self.is_position_occupied(position):
-            self.game_state.add_notification(f"Cannot build {building_type} here: space occupied")
-            return None
-        
-        building = Building(building_type, position, self)
-        return building
-    
-    def is_position_occupied(self, position):
-        """Check if the position is already occupied by another building"""
-        for building in self.buildings:
-            if distance(building.position, position) < 2:
-                return True
-        return False
-    
-    def update(self, dt):
-        """Update all buildings"""
-        for building in list(self.buildings):
-            building.step(dt)
-            
-            if building.health <= 0:
-                self.remove_building(building)
-    
-    def remove_building(self, building):
-        """Remove a building from the game"""
-        if building in self.buildings:
-            self.buildings.remove(building)
-            self.game_state.add_notification(f"{building.building_type} has broken down completely")
-            destroy(building)
-    
-    def get_monthly_maintenance_cost(self):
-        """Calculate the total monthly maintenance cost for all buildings"""
-        total_cost = 0
-        for building in self.buildings:
-            cost = self.building_config[building.building_type]["maintenance_cost"]
-            health_factor = 1 + (1 - building.health / 100) 
-            total_cost += cost * health_factor
-        
-        return total_cost
-    
-    def calculate_tourist_infrastructure_score(self):
-        """Calculate a score for tourist infrastructure"""
-        if not self.buildings:
-            return 0
-        
-        path_count = len([b for b in self.buildings if b.building_type == "path"])
-        platform_count = len([b for b in self.buildings if b.building_type == "viewing_platform"])
-        
-        base_score = min(80, path_count * 5 + platform_count * 15)
-        
-        avg_health = sum(b.health for b in self.buildings) / len(self.buildings)
-        health_factor = avg_health / 100
-        
-        return base_score * health_factor
-    
-    def save_buildings(self, filename="buildings.json"):
-        """Save building data to a file"""
-        building_data = []
-        
-        for building in self.buildings:
-            data = {
-                "building_type": building.building_type,
-                "position": [building.x, building.y, building.z],
-                "health": building.health
-            }
-            building_data.append(data)
-        
-        with open(filename, 'w') as f:
-            json.dump(building_data, f)
-        
-        return True
-    
-    def load_buildings(self, filename="buildings.json"):
-        """Load building data from a file"""
-        try:
-            with open(filename, 'r') as f:
-                building_data = json.load(f)
-            
-            for building in list(self.buildings):
-                self.remove_building(building)
-            
-            for data in building_data:
-                pos = Vec3(*data["position"])
-                building = Building(data["building_type"], pos, self)
-                building.health = data["health"]
-            
-            return True
-        except Exception as e:
-            print(f"Error loading buildings: {str(e)}")
-            return False
-
-
-def distance(a, b):
-    """Calculate distance between two entities or positions"""
-    if hasattr(a, 'position'):
-        pos_a = a.position
-    else:
-        pos_a = a
-    
-    if hasattr(b, 'position'):
-        pos_b = b.position
-    else:
-        pos_b = b
-    
-    return math.sqrt((pos_a.x - pos_b.x)**2 + (pos_a.z - pos_b.z)**2)
-// File: economy.py
+// File: components.py
+import pygame
+import sys
 import random
 import math
-from ursina import *
+import noise
+import json
+from datetime import datetime
+from os import path
+from constants import *
 
-class Tourist(Entity):
-    def __init__(self, position, economy_manager):
-        super().__init__(
-            model='sphere',
-            color=color.rgba(255, 105, 180, 255),
-            scale=(0.5, 1, 0.5),
-            position=position,
-            name=f"tourist_{id(self)}"
-        )
-        
-        self.manager = economy_manager
-        self.terrain = economy_manager.terrain
-        self.game_state = economy_manager.game_state
-        
-        self.speed = random.uniform(2.0, 4.0)
-        self.satisfaction = random.uniform(50, 70)
-        self.spending_rate = random.uniform(5, 15)
-        self.visit_duration = random.uniform(5, 15)
-        self.time_spent = 0
-        
-        self.target_position = None
-        self.path = []
-        self.path_index = 0
-        self.waiting_time = 0
+class Button:
+    def __init__(self, x, y, width, height, text, color, hover_color, text_color=BLACK, font_size=20, action=None):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.color = color
+        self.hover_color = hover_color
+        self.text = text
+        self.text_color = text_color
+        self.font = pygame.font.SysFont('Arial', font_size)
+        self.action = action
+        self.active = True
     
-    def step(self, dt):
-        """Update tourist behavior"""
-        self.time_spent += dt / 60
+    def draw(self, screen):
+        if not self.active:
+            return
+            
+        mouse_pos = pygame.mouse.get_pos()
         
-        self.update_satisfaction(dt)
+        if self.rect.collidepoint(mouse_pos):
+            pygame.draw.rect(screen, self.hover_color, self.rect, border_radius=5)
+        else:
+            pygame.draw.rect(screen, self.color, self.rect, border_radius=5)
         
-        self.move(dt)
+        pygame.draw.rect(screen, BLACK, self.rect, 2, border_radius=5)
         
-        if self.time_spent % 1.0 < dt / 60:
-            self.spend_money()
-        
-        if self.time_spent >= self.visit_duration:
-            self.leave()
-            return True
-        
+        text_surface = self.font.render(self.text, True, self.text_color)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        screen.blit(text_surface, text_rect)
+    
+    def handle_event(self, event):
+        if not self.active:
+            return False
+            
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                if self.action:
+                    self.action()
+                return True
         return False
-    
-    def update_satisfaction(self, dt):
-        """Update satisfaction based on surroundings"""
-        self.satisfaction -= 0.5 * dt / 60
-        
-        nearby_animals = [a for a in self.manager.animals.animals 
-                         if distance(self, a) < 10]
-        
-        if nearby_animals:
-            species_seen = set(a.species for a in nearby_animals)
-            self.satisfaction += len(species_seen) * 2 * dt / 60
-            
-            for animal in nearby_animals:
-                if animal.species == "elephant" or animal.species == "lion":
-                    self.satisfaction += 1 * dt / 60
-        
-        nearby_buildings = [b for b in self.manager.buildings.buildings 
-                           if distance(self, b) < 3]
-        
-        on_path = any(b.building_type == "path" for b in nearby_buildings)  # Changed from "walking_path" to "path"
-        at_platform = any(b.building_type == "viewing_platform" for b in nearby_buildings)
-        
-        if on_path:
-            self.satisfaction += 0.2 * dt / 60
-        else:
-            self.satisfaction -= 1.0 * dt / 60
-        
-        if at_platform:
-            self.satisfaction += 2.0 * dt / 60
-        
-        self.satisfaction = max(0, min(100, self.satisfaction))
-    
-    def move(self, dt):
-        """Move around the park"""
-        if self.waiting_time > 0:
-            self.waiting_time -= dt
-            return
-        
-        if not self.target_position or distance(self, self.target_position) < 1:
-            self.choose_new_target()
-            self.waiting_time = random.uniform(5, 20)
-            return
-        
-        direction = self.target_position - self.position
-        if direction.length() > 0:
-            direction = direction.normalized()
-        
-        speed = self.speed * dt
-        self.position += direction * speed
-        
-        terrain_height = self.terrain.get_height_at_position(self.position)
-        self.y = terrain_height + 1
-        
-        if direction.length() > 0:
-            self.look_at(self.position + direction)
-            self.rotation_x = 0
-    
-    def choose_new_target(self):
-        """Choose a new target to move towards"""
-        paths = [b for b in self.manager.buildings.buildings 
-               if b.building_type == "path"]  # Changed from "walking_path" to "path"
-        platforms = [b for b in self.manager.buildings.buildings 
-                    if b.building_type == "viewing_platform"]
-        
-        animals = self.manager.animals.animals
-        
-        if random.random() < 0.7 and paths:
-            target = random.choice(paths)
-            self.target_position = target.position
-        elif random.random() < 0.8 and platforms:
-            target = random.choice(platforms)
-            self.target_position = target.position
-        elif random.random() < 0.9 and animals:
-            target = random.choice(animals)
-            self.target_position = target.position
-        else:
-            x = random.uniform(-self.terrain.size/2, self.terrain.size/2)
-            z = random.uniform(-self.terrain.size/2, self.terrain.size/2)
-            
-            while self.terrain.is_water_at_position((x, 0, z)):
-                x = random.uniform(-self.terrain.size/2, self.terrain.size/2)
-                z = random.uniform(-self.terrain.size/2, self.terrain.size/2)
-            
-            self.target_position = Vec3(x, 0, z)
-    
-    def spend_money(self):
-        """Tourist spends money based on their satisfaction"""
-        spending = self.spending_rate * (self.satisfaction / 50)
-        
-        self.manager.game_state.add_funds(spending)
-    
-    def leave(self):
-        """Tourist leaves the park"""
-        if self in self.manager.tourists:
-            self.manager.tourists.remove(self)
-        
-        review_score = max(1, min(5, int(self.satisfaction / 20)))
-        self.manager.add_review(review_score)
-        
-        destroy(self)
+// File: economy_manager.py
+import pygame
+import random
+from tourist import Tourist
+from constants import *
 
 class EconomyManager:
     def __init__(self, game_state, animal_manager, building_manager):
@@ -903,6 +661,7 @@ class EconomyManager:
         self.terrain = building_manager.terrain
         
         self.tourists = []
+        self.tourists_group = pygame.sprite.Group()
         self.reviews = []
         self.avg_review_score = 3.0
         self.daily_income = 0
@@ -914,6 +673,8 @@ class EconomyManager:
         self.base_tourist_rate = 5
         self.tourist_modifier = self.game_state.difficulty_settings["tourist_rate"]
         self.entrance_fee = 20
+        
+        self.vehicle_manager = None
     
     def update(self, dt):
         """Update economic systems"""
@@ -990,12 +751,14 @@ class EconomyManager:
             return
         
         if random.random() < spawn_chance:
-            entrance_x = self.terrain.size / 2 - 5
-            entrance_z = 0
-            entrance_pos = Vec3(entrance_x, 1, entrance_z)
+            terrain_size = self.terrain.size * TILE_SIZE
+            entrance_x = terrain_size / 2 - 5 * TILE_SIZE
+            entrance_y = 0
+            entrance_pos = (entrance_x, entrance_y)
             
             tourist = Tourist(entrance_pos, self)
             self.tourists.append(tourist)
+            self.tourists_group.add(tourist)
             
             self.game_state.add_funds(self.entrance_fee)
             self.daily_income += self.entrance_fee
@@ -1007,7 +770,7 @@ class EconomyManager:
         if len(self.reviews) > 100:
             self.reviews.pop(0)
         
-        self.avg_review_score = sum(self.reviews) / len(self.reviews)
+        self.avg_review_score = sum(self.reviews) / len(self.reviews) if self.reviews else 3.0
     
     def get_park_stats(self):
         """Get statistics about the park's performance"""
@@ -1019,25 +782,25 @@ class EconomyManager:
             "daily_income": self.daily_income,
             "monthly_expenses": self.monthly_expenses
         }
-
-
-def distance(a, b):
-    """Calculate distance between two entities or positions"""
-    if hasattr(a, 'position'):
-        pos_a = a.position
-    else:
-        pos_a = a
-    
-    if hasattr(b, 'position'):
-        pos_b = b.position
-    else:
-        pos_b = b
-    
-    return math.sqrt((pos_a.x - pos_b.x)**2 + (pos_a.z - pos_b.z)**2)
+        
+    def render(self, screen, camera_offset):
+        """Render all tourists with camera offset"""
+        for tourist in self.tourists:
+            screen_pos = (tourist.position[0] - camera_offset[0], 
+                         tourist.position[1] - camera_offset[1])
+            
+            if (screen_pos[0] < -50 or screen_pos[0] > SCREEN_WIDTH + 50 or
+                screen_pos[1] < -50 or screen_pos[1] > SCREEN_HEIGHT + 50):
+                continue
+            
+            rect = tourist.image.get_rect()
+            rect.center = screen_pos
+            
+            screen.blit(tourist.image, rect)
 // File: game_state.py
-import json
-import os
+import pygame
 from datetime import datetime
+from constants import *
 
 class GameState:
     def __init__(self, difficulty="medium"):
@@ -1052,7 +815,7 @@ class GameState:
         self.animal_stats = {}
         self.ecosystem_balance = 100
         self.notifications = []
-        
+    
     def load_difficulty_settings(self):
         self.settings = {
             "easy": {
@@ -1160,7 +923,7 @@ class GameState:
     
     def load_game(self, filename="savegame.json"):
         """Load game state from a file"""
-        if not os.path.exists(filename):
+        if not path.exists(filename):
             self.add_notification(f"Save file {filename} not found")
             return False
         
@@ -1181,102 +944,552 @@ class GameState:
         except Exception as e:
             self.add_notification(f"Error loading game: {str(e)}")
             return False
+
 // File: main.py
+import sys
+import pygame
+import random
+import math
+from datetime import datetime
+import noise
+import json
+from os import path
+from collections import defaultdict
 
-from ursina import *
-from world      import TerrainGenerator
-from animals    import AnimalManager
-from buildings  import BuildingManager
-from economy    import EconomyManager
-from ui         import UIManager
 from game_state import GameState
-from vehicles   import VehicleManager
+from terrain import TerrainGenerator
+from building_manager import BuildingManager
+from animal_manager import AnimalManager
+from vehicle import VehicleManager
+from economy_manager import EconomyManager
+from ui import UIManager
+from constants import *
 
-Text.default_font = 'assets/fonts/DejaVuSans.ttf'
-
-def input(key):
-    global build_mode, selected_building
-    if key == '1':   game_state.set_game_speed(0)
-    elif key == '2': game_state.set_game_speed(1)
-    elif key == '3': game_state.set_game_speed(3)
-    elif key == 'b':
-        build_mode = not build_mode
-        ui.toggle_build_menu(build_mode)
-    elif key == 'tab':
-        ui.toggle_animal_overview()
-    elif key == 'left mouse down' and build_mode and selected_building:
-        if mouse.hovered_entity and mouse.hovered_entity.name == 'terrain':
-            buildings.place_building(selected_building, mouse.world_point)
-    elif build_mode:
-        if key == 'f': selected_building = 'feeding_station'
-        if key == 'w': selected_building = 'water_station'
-        if key == 'p': selected_building = 'path'
-        if key == 'v': selected_building = 'viewing_platform'
-
-def update():
-    global vehicles
-    if held_keys['w']: camera_pivot.position += (0,0,camera_speed*time.dt)
-    if held_keys['s']: camera_pivot.position -= (0,0,camera_speed*time.dt)
-    if held_keys['a']: camera_pivot.position -= (camera_speed*time.dt,0,0)
-    if held_keys['d']: camera_pivot.position += (camera_speed*time.dt,0,0)
-    if held_keys['q']: camera_pivot.rotation_y -= rotation_speed*time.dt
-    if held_keys['e']: camera_pivot.rotation_y += rotation_speed*time.dt
-
-    if game_state.game_speed > 0:
-        ts = game_state.game_speed
-        animals .update(time.dt*ts)
-        buildings.update(time.dt*ts)
-        economy .update(time.dt*ts)
-        game_state.update(time.dt*ts)
-        vehicles.update(time.dt*ts)
-
-    if game_state.check_win_condition():  ui.show_win_screen()
-    if game_state.check_lose_condition(): ui.show_lose_screen()
-    ui.update()
+pygame.init()
+pygame.font.init()
 
 def main(difficulty='medium'):
-    global game_state, terrain, animals, buildings, economy, ui, vehicles
-    global camera_pivot, camera_speed, rotation_speed
-    global build_mode, selected_building
-
-    app = Ursina()
-    window.title = "Safari - Wildlife Management Sim"
-    window.borderless = False
-    window.exit_button.visible = True
-    window.fps_counter.enabled = True
-
+    """Main game function"""
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    pygame.display.set_caption("Safari Park - Pygame Edition")
+    clock = pygame.time.Clock()
+    
     game_state = GameState(difficulty)
-    terrain    = TerrainGenerator(game_state)
-    buildings  = BuildingManager( game_state, terrain)
-    animals    = AnimalManager(   game_state, terrain)
-    economy    = EconomyManager(  game_state, animals, buildings)
-    ui         = UIManager(       game_state, animals, buildings, economy)
-    vehicles   = VehicleManager(game_state, buildings, terrain)
-    economy.vehicle_manager = vehicles
-
+    terrain = TerrainGenerator(game_state)
+    buildings = BuildingManager(game_state, terrain)
+    animals = AnimalManager(game_state, terrain)
+    vehicles = VehicleManager(game_state, buildings, terrain)
+    economy = EconomyManager(game_state, animals, buildings)
+    ui = UIManager(game_state, animals, buildings, economy)
+    
     animals.set_building_manager(buildings)
     animals.update_animal_stats()
+    economy.vehicle_manager = vehicles
+    
+    camera_offset = [0, 0]
+    camera_speed = 500
+    
+    running = True
+    game_state.set_game_speed(1)
+    
+    while running:
+        dt = clock.tick(FPS) / 1000.0
+        
+        mouse_pos = pygame.mouse.get_pos()
+        keys = pygame.key.get_pressed()
+        
+        if keys[pygame.K_w]:
+            camera_offset[1] -= camera_speed * dt
+        if keys[pygame.K_s]:
+            camera_offset[1] += camera_speed * dt
+        if keys[pygame.K_a]:
+            camera_offset[0] -= camera_speed * dt
+        if keys[pygame.K_d]:
+            camera_offset[0] += camera_speed * dt
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_1:
+                    game_state.set_game_speed(0)
+                elif event.key == pygame.K_2:
+                    game_state.set_game_speed(1)
+                elif event.key == pygame.K_3:
+                    game_state.set_game_speed(3)
+                
+                elif event.key == pygame.K_b:
+                    ui.toggle_build_menu()
+                
+                elif event.key == pygame.K_TAB:
+                    ui.toggle_animal_overview()
+                
+                elif event.key == pygame.K_f and ui.build_menu_active:
+                    ui.select_building('feeding_station')
+                elif event.key == pygame.K_w and ui.build_menu_active:
+                    ui.select_building('water_station')
+                elif event.key == pygame.K_p and ui.build_menu_active:
+                    ui.select_building('path')
+                elif event.key == pygame.K_v and ui.build_menu_active:
+                    ui.select_building('viewing_platform')
+            
+            if ui.handle_event(event, camera_offset):
+                continue
+        
+        if game_state.game_speed > 0:
+            ts = game_state.game_speed
+            animals.update(dt * ts)
+            buildings.update(dt * ts)
+            economy.update(dt * ts)
+            vehicles.update(dt * ts)
+            game_state.update(dt * ts)
+        
+        if game_state.check_win_condition():
+            print("You win!")
+            pygame.draw.rect(screen, (0, 100, 0, 200), (SCREEN_WIDTH//4, SCREEN_HEIGHT//4, 
+                                                      SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            win_text = ui.title_font.render("You Win!", True, WHITE)
+            screen.blit(win_text, (SCREEN_WIDTH//2 - win_text.get_width()//2, 
+                                 SCREEN_HEIGHT//2 - win_text.get_height()//2))
+            pygame.display.flip()
+            pygame.time.wait(5000)
+            running = False
+            
+        if game_state.check_lose_condition():
+            print("You lose!")
+            pygame.draw.rect(screen, (100, 0, 0, 200), (SCREEN_WIDTH//4, SCREEN_HEIGHT//4, 
+                                                      SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            lose_text = ui.title_font.render("Game Over", True, WHITE)
+            screen.blit(lose_text, (SCREEN_WIDTH//2 - lose_text.get_width()//2, 
+                                  SCREEN_HEIGHT//2 - lose_text.get_height()//2))
+            pygame.display.flip()
+            pygame.time.wait(5000)
+            running = False
+        
+        screen.fill(BLACK)
+        
+        terrain.render(screen, camera_offset)
+        buildings.render(screen, camera_offset)
+        animals.render(screen, camera_offset)
+        economy.render(screen, camera_offset)
+        vehicles.render(screen, camera_offset)
+        
+        ui.draw(screen, camera_offset, mouse_pos)
+        
+        pygame.display.flip()
+    
+    pygame.quit()
+    sys.exit()
 
-    camera_pivot = Entity()
-    camera.parent      = camera_pivot
-    camera.position    = (0,20,-20)
-    camera.rotation_x  = 40
-
-    camera_speed   = 10
-    rotation_speed = 50
-    build_mode     = False
-    selected_building = None
-
-    game_state.set_game_speed(0)
-    app.run()
 
 if __name__ == '__main__':
-    import sys
-    main(sys.argv[1].lower() if len(sys.argv)>1 else 'medium')
+    if len(sys.argv) > 1:
+        difficulty = sys.argv[1].lower()
+        if difficulty not in ['easy', 'medium', 'hard']:
+            print("Invalid difficulty. Using 'medium' instead.")
+            difficulty = 'medium'
+    else:
+        difficulty = 'medium'
+    
+    main(difficulty)
+
+// File: terrain.py
+import pygame
+import random
+import noise
+from constants import *
+
+class TerrainGenerator:
+    def __init__(self, game_state, size=64):
+        self.game_state = game_state
+        self.size = size
+        self.tile_size = TILE_SIZE
+        self.water_threshold = 0.3
+        self.grass_threshold = 0.7
+        self.rocky_threshold = 0.9
+        
+        self.terrain_grid = self.generate_terrain_grid()
+        
+        self.terrain_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
+        self.vegetation_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
+        self.create_terrain_surfaces()
+    
+    def generate_terrain_grid(self):
+        """Generate a 2D terrain grid using Perlin noise"""
+        terrain_grid = []
+        
+        seed = random.randint(0, 1000)
+        scale = 10.0
+        octaves = 4
+        persistence = 0.5
+        lacunarity = 2.0
+        
+        for y in range(self.size):
+            row = []
+            for x in range(self.size):
+                nx = x / self.size - 0.5
+                ny = y / self.size - 0.5
+                
+                noise_value = noise.pnoise2(
+                    nx * scale, 
+                    ny * scale, 
+                    octaves=octaves, 
+                    persistence=persistence, 
+                    lacunarity=lacunarity,
+                    repeatx=1024,
+                    repeaty=1024,
+                    base=seed
+                )
+                
+                noise_value = (noise_value + 1) / 2
+                
+                dist_from_center = ((x - self.size/2)**2 + (y - self.size/2)**2)**0.5
+                center_factor = max(0, 1 - (dist_from_center / (self.size/3)))
+                basin_effect = center_factor * 0.4
+                noise_value = max(0, noise_value - basin_effect)
+                
+                if noise_value < self.water_threshold:
+                    terrain_type = "water"
+                elif noise_value < self.grass_threshold:
+                    terrain_type = "grass"
+                elif noise_value < self.rocky_threshold:
+                    terrain_type = "rocky"
+                else:
+                    terrain_type = "mountain"
+                
+                row.append({
+                    "type": terrain_type,
+                    "value": noise_value
+                })
+            terrain_grid.append(row)
+        
+        return terrain_grid
+    
+    def create_terrain_surfaces(self):
+        """Create pre-rendered surfaces for the terrain"""
+        self.terrain_surface.fill((50, 150, 50))
+        
+        for y in range(self.size):
+            for x in range(self.size):
+                tile_data = self.terrain_grid[y][x]
+                tile_x = x * self.tile_size
+                tile_y = y * self.tile_size
+                
+                if tile_data["type"] == "water":
+                    pygame.draw.rect(self.terrain_surface, LIGHT_BLUE, 
+                                    (tile_x, tile_y, self.tile_size, self.tile_size))
+                
+                elif tile_data["type"] == "rocky":
+                    pygame.draw.rect(self.terrain_surface, GRAY, 
+                                    (tile_x, tile_y, self.tile_size, self.tile_size))
+                
+                elif tile_data["type"] == "mountain":
+                    pygame.draw.rect(self.terrain_surface, DARK_GRAY, 
+                                    (tile_x, tile_y, self.tile_size, self.tile_size))
+        
+        random.seed(42)
+        
+        num_trees = int(self.size * self.size * 0.01)
+        num_bushes = int(self.size * self.size * 0.02)
+        
+        tree_color = DARK_GREEN
+        bush_color = GREEN
+        
+        for _ in range(num_trees):
+            x = random.randint(0, self.size - 1)
+            y = random.randint(0, self.size - 1)
+            
+            if self.terrain_grid[y][x]["type"] == "grass":
+                tree_x = x * self.tile_size + self.tile_size * 0.1
+                tree_y = y * self.tile_size 
+                tree_width = self.tile_size * 0.8
+                tree_height = self.tile_size * 1.2
+                
+                pygame.draw.rect(self.vegetation_surface, BROWN, 
+                                (tree_x + tree_width/3, tree_y + tree_height/2, tree_width/3, tree_height/2))
+                pygame.draw.circle(self.vegetation_surface, tree_color, 
+                                 (int(tree_x + tree_width/2), int(tree_y + tree_height/3)), 
+                                 int(tree_width/2))
+        
+        for _ in range(num_bushes):
+            x = random.randint(0, self.size - 1)
+            y = random.randint(0, self.size - 1)
+            
+            if self.terrain_grid[y][x]["type"] == "grass":
+                bush_x = x * self.tile_size + self.tile_size * 0.25
+                bush_y = y * self.tile_size + self.tile_size * 0.25
+                bush_size = self.tile_size * 0.5
+                
+                pygame.draw.circle(self.vegetation_surface, bush_color, 
+                                 (int(bush_x + bush_size/2), int(bush_y + bush_size/2)), 
+                                 int(bush_size/2))
+    
+    def world_to_grid(self, world_pos):
+        """Convert world position to grid position"""
+        grid_x = int((world_pos[0] + self.size * self.tile_size / 2) / self.tile_size)
+        grid_y = int((world_pos[1] + self.size * self.tile_size / 2) / self.tile_size)
+        
+        grid_x = max(0, min(grid_x, self.size - 1))
+        grid_y = max(0, min(grid_y, self.size - 1))
+        
+        return (grid_x, grid_y)
+    
+    def grid_to_world(self, grid_pos):
+        """Convert grid position to world position"""
+        world_x = grid_pos[0] * self.tile_size - self.size * self.tile_size / 2 + self.tile_size / 2
+        world_y = grid_pos[1] * self.tile_size - self.size * self.tile_size / 2 + self.tile_size / 2
+        
+        return (world_x, world_y)
+    
+    def get_terrain_at_position(self, world_pos):
+        """Get the terrain type at the given world position"""
+        grid_x, grid_y = self.world_to_grid(world_pos)
+        return self.terrain_grid[grid_y][grid_x]["type"]
+    
+    def is_water_at_position(self, world_pos):
+        """Check if there is water at the given position"""
+        return self.get_terrain_at_position(world_pos) == "water"
+    
+    def is_suitable_for_building(self, world_pos):
+        """Check if the given position is suitable for building"""
+        return self.get_terrain_at_position(world_pos) == "grass"
+    
+    def render(self, screen, camera_offset):
+        """Render the terrain with camera offset"""
+        viewport_rect = pygame.Rect(
+            camera_offset[0], 
+            camera_offset[1], 
+            SCREEN_WIDTH, 
+            SCREEN_HEIGHT
+        )
+        
+        terrain_rect = pygame.Rect(
+            viewport_rect.x + self.size * self.tile_size / 2,
+            viewport_rect.y + self.size * self.tile_size / 2, 
+            viewport_rect.width, 
+            viewport_rect.height
+        )
+        
+        screen.blit(self.terrain_surface, (-camera_offset[0] - self.size * self.tile_size / 2, 
+                                          -camera_offset[1] - self.size * self.tile_size / 2))
+        screen.blit(self.vegetation_surface, (-camera_offset[0] - self.size * self.tile_size / 2, 
+                                            -camera_offset[1] - self.size * self.tile_size / 2))
+    
+    def save_terrain(self, filename="terrain.json"):
+        """Save terrain data to a file"""
+        serialized_grid = []
+        for row in self.terrain_grid:
+            serialized_row = []
+            for tile in row:
+                serialized_row.append({
+                    "type": tile["type"],
+                    "value": tile["value"]
+                })
+            serialized_grid.append(serialized_row)
+            
+        terrain_data = {
+            "size": self.size,
+            "terrain_grid": serialized_grid
+        }
+        
+        with open(filename, 'w') as f:
+            json.dump(terrain_data, f)
+        
+        return True
+    
+    def load_terrain(self, filename="terrain.json"):
+        """Load terrain data from a file"""
+        try:
+            with open(filename, 'r') as f:
+                terrain_data = json.load(f)
+            
+            self.size = terrain_data["size"]
+            self.terrain_grid = terrain_data["terrain_grid"]
+            
+            self.terrain_surface = pygame.Surface((self.size * self.tile_size, self.size * self.tile_size), pygame.SRCALPHA)
+            self.vegetation_surface = pygame.Surface((self.size * self.tile_size, self.size * self.tile_size), pygame.SRCALPHA)
+            self.create_terrain_surfaces()
+            
+            return True
+        except Exception as e:
+            print(f"Error loading terrain: {str(e)}")
+            return False
+
+// File: tourist.py
+import pygame
+import random
+import math
+from constants import *
+from utils import distance
+
+class Tourist(pygame.sprite.Sprite):
+    def __init__(self, position, economy_manager):
+        super().__init__()
+        
+        size = int(TILE_SIZE * 0.8)
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, PINK, (size//2, size//2), size//2)
+        
+        self.rect = self.image.get_rect()
+        self.rect.center = position
+        
+        self.position = position
+        self.manager = economy_manager
+        self.terrain = economy_manager.terrain
+        self.game_state = economy_manager.game_state
+        
+        self.speed = random.uniform(2.0, 4.0) * (TILE_SIZE / 32)
+        self.satisfaction = random.uniform(50, 70)
+        self.spending_rate = random.uniform(5, 15)
+        self.visit_duration = random.uniform(5, 15)
+        self.time_spent = 0
+        
+        self.target_position = None
+        self.path = []
+        self.path_index = 0
+        self.waiting_time = 0
+    
+    def step(self, dt):
+        """Update tourist behavior"""
+        self.time_spent += dt / 60
+        
+        self.update_satisfaction(dt)
+        
+        self.move(dt)
+        
+        if self.time_spent % 1.0 < dt / 60:
+            self.spend_money()
+        
+        if self.time_spent >= self.visit_duration:
+            self.leave()
+            return True
+        
+        return False
+    
+    def update_satisfaction(self, dt):
+        """Update satisfaction based on surroundings"""
+        self.satisfaction -= 0.5 * dt / 60
+        
+        nearby_animals = [a for a in self.manager.animals.animals 
+                          if distance(self.position, a.position) < TILE_SIZE * 10]
+        
+        if nearby_animals:
+            species_seen = set(a.species for a in nearby_animals)
+            self.satisfaction += len(species_seen) * 2 * dt / 60
+            
+            for animal in nearby_animals:
+                if animal.species == "elephant" or animal.species == "lion":
+                    self.satisfaction += 1 * dt / 60
+        
+        nearby_buildings = [b for b in self.manager.buildings.buildings 
+                           if distance(self.position, b.position) < TILE_SIZE * 3]
+        
+        on_path = any(b.building_type == "path" for b in nearby_buildings)
+        at_platform = any(b.building_type == "viewing_platform" for b in nearby_buildings)
+        
+        if on_path:
+            self.satisfaction += 0.2 * dt / 60
+        else:
+            self.satisfaction -= 1.0 * dt / 60
+        
+        if at_platform:
+            self.satisfaction += 2.0 * dt / 60
+        
+        self.satisfaction = max(0, min(100, self.satisfaction))
+        
+        if self.satisfaction > 80:
+            color = GREEN
+        elif self.satisfaction > 50:
+            color = YELLOW
+        elif self.satisfaction > 30:
+            color = ORANGE
+        else:
+            color = RED
+            
+        size = int(TILE_SIZE * 0.8)
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, color, (size//2, size//2), size//2)
+    
+    def move(self, dt):
+        """Move around the park"""
+        if self.waiting_time > 0:
+            self.waiting_time -= dt
+            return
+        
+        if not self.target_position or distance(self.position, self.target_position) < TILE_SIZE:
+            self.choose_new_target()
+            self.waiting_time = random.uniform(5, 20)
+            return
+        
+        direction_x = self.target_position[0] - self.position[0]
+        direction_y = self.target_position[1] - self.position[1]
+        
+        dir_length = math.sqrt(direction_x**2 + direction_y**2)
+        if dir_length > 0:
+            direction_x = direction_x / dir_length
+            direction_y = direction_y / dir_length
+        
+        speed = self.speed * dt
+        
+        move_x = direction_x * speed
+        move_y = direction_y * speed
+        
+        new_pos = (self.position[0] + move_x, self.position[1] + move_y)
+        
+        if not self.terrain.is_water_at_position(new_pos):
+            self.position = new_pos
+            self.rect.center = self.position
+    
+    def choose_new_target(self):
+        """Choose a new target to move towards"""
+        paths = [b for b in self.manager.buildings.buildings 
+               if b.building_type == "path"]
+        platforms = [b for b in self.manager.buildings.buildings 
+                    if b.building_type == "viewing_platform"]
+        
+        animals = self.manager.animals.animals
+        
+        if random.random() < 0.7 and paths:
+            target = random.choice(paths)
+            self.target_position = target.position
+        elif random.random() < 0.8 and platforms:
+            target = random.choice(platforms)
+            self.target_position = target.position
+        elif random.random() < 0.9 and animals:
+            target = random.choice(animals)
+            self.target_position = target.position
+        else:
+            terrain_size = self.terrain.size * TILE_SIZE
+            x = random.uniform(-terrain_size/2, terrain_size/2)
+            y = random.uniform(-terrain_size/2, terrain_size/2)
+            
+            while self.terrain.is_water_at_position((x, y)):
+                x = random.uniform(-terrain_size/2, terrain_size/2)
+                y = random.uniform(-terrain_size/2, terrain_size/2)
+            
+            self.target_position = (x, y)
+    
+    def spend_money(self):
+        """Tourist spends money based on their satisfaction"""
+        spending = self.spending_rate * (self.satisfaction / 50)
+        
+        self.manager.game_state.add_funds(spending)
+    
+    def leave(self):
+        """Tourist leaves the park"""
+        if self in self.manager.tourists:
+            self.manager.tourists.remove(self)
+            self.manager.tourists_group.remove(self)
+        
+        review_score = max(1, min(5, int(self.satisfaction / 20)))
+        self.manager.add_review(review_score)
+
 // File: ui.py
-from ursina import *
-from ursina.prefabs.dropdown_menu import DropdownMenu
-from ursina.prefabs.tooltip import Tooltip
+import pygame
+from constants import *
+from components import Button
+from utils import distance
 
 class UIManager:
     def __init__(self, game_state, animal_manager, building_manager, economy_manager):
@@ -1285,623 +1498,414 @@ class UIManager:
         self.building_manager = building_manager
         self.economy_manager = economy_manager
         
-        self.ui = Entity(parent=camera.ui)
+        self.selected_building = None
+        self.build_menu_active = False
+        self.animal_overview_active = False
         
-        self.create_resource_display()
+        self.build_buttons = []
+        self.time_buttons = []
         
-        self.build_menu = None
+        self.small_font = pygame.font.SysFont('Arial', 14)
+        self.medium_font = pygame.font.SysFont('Arial', 18)
+        self.large_font = pygame.font.SysFont('Arial', 24)
+        self.title_font = pygame.font.SysFont('Arial', 32)
         
-        self.animal_overview = None
+        self.notification_surface = pygame.Surface((int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)), pygame.SRCALPHA)
         
-        self.create_time_controls()
-        
-        self.create_notification_area()
+        self.create_menu_buttons()
     
-    def create_resource_display(self):
-        """Create the display for resources (money, etc)"""
-        self.resource_bar = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(1, 0.05, 1),
-            position=(0, 0.475, 0),
-            color=color.dark_gray
-        )
+    def create_menu_buttons(self):
+        """Create the UI buttons"""
+        button_y = SCREEN_HEIGHT - 40
+        self.time_buttons = [
+            Button(SCREEN_WIDTH//2 - 90, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(0)),
+            Button(SCREEN_WIDTH//2 - 30, button_y, 60, 30, "Normal", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(1)),
+            Button(SCREEN_WIDTH//2 + 30, button_y, 60, 30, "Fast", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(3))
+        ]
         
-        self.money_text = Text(
-            parent=self.resource_bar,
-            text=f"${self.game_state.funds:.2f}",
-            position=(-0.45, 0, 0),
-            scale=0.7,
-            color=color.lime
-        )
+        menu_x = 10
+        menu_y = 60
+        button_spacing = 40
         
-        self.ecosystem_text = Text(
-            parent=self.resource_bar,
-            text=f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%",
-            position=(0, 0, 0),
-            scale=0.7,
-            color=color.white
-        )
+        self.build_buttons = [
+            Button(menu_x, menu_y, 30, 30, "F", ORANGE, LIGHT_RED, 
+                  action=lambda: self.select_building("feeding_station")),
+            Button(menu_x, menu_y + button_spacing, 30, 30, "W", BLUE, (100, 100, 255), 
+                  action=lambda: self.select_building("water_station")),
+            Button(menu_x, menu_y + button_spacing*2, 30, 30, "P", BROWN, (200, 150, 100), 
+                  action=lambda: self.select_building("path")),
+            Button(menu_x, menu_y + button_spacing*3, 30, 30, "V", LIGHT_GRAY, WHITE, 
+                  action=lambda: self.select_building("viewing_platform")),
+        ]
         
-        self.tourist_text = Text(
-            parent=self.resource_bar,
-            text=f"Tourists: 0 (★★★☆☆)",
-            position=(0.45, 0, 0),
-            scale=0.7,
-            color=color.yellow
-        )
-    
-    def create_time_controls(self):
-        """Create the time control buttons"""
-        self.time_bar = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(0.3, 0.05, 1),
-            position=(0, -0.475, 0),
-            color=color.dark_gray
-        )
-        
-        self.time_text = Text(
-            parent=self.time_bar,
-            text=f"Day {self.game_state.day} - {int(self.game_state.time_of_day):02d}:00",
-            position=(0, 0.2, 0),
-            scale=0.7,
-            color=color.white
-        )
-        
-        self.pause_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(-0.12, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="❚❚",
-            on_click=lambda: self.game_state.set_game_speed(0)
-        )
-        
-        self.normal_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(0, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="▶",
-            on_click=lambda: self.game_state.set_game_speed(1)
-        )
-        
-        self.fast_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(0.12, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="▶▶",
-            on_click=lambda: self.game_state.set_game_speed(3)
-        )
-    
-    def create_notification_area(self):
-        """Create the area for game notifications"""
-        self.notification_panel = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(0.3, 0.15, 1),
-            position=(0.35, -0.35, 0),
-            color=color.rgba(0, 0, 0, 150),
-            visible=True
-        )
-        
-        Text(
-            parent=self.notification_panel,
-            text="Notifications",
-            position=(0, 0.45, 0),
-            scale=0.7,
-            color=color.white
-        )
-        
-        self.notification_text = Text(
-            parent=self.notification_panel,
-            text="Welcome to your safari park!",
-            position=(0, 0, 0),
-            scale=0.5,
-            color=color.light_gray,
-            wordwrap=25
-        )
-    
-    def toggle_build_menu(self, show):
-        """Show or hide the building menu"""
-        if show and not self.build_menu:
-            # parent to our UI canvas
-            self.build_menu = Entity(
-                parent=self.ui,
-                model='quad',
-                scale=(0.2, 0.4, 1),             # <-- 3‐component scale
-                position=(-0.4, 0, 0),           # <-- 3‐component position
-                color=color.rgba(0, 0, 0, 200)
+        if hasattr(self.economy_manager, 'vehicle_manager') and self.economy_manager.vehicle_manager:
+            self.build_buttons.append(
+                Button(menu_x, menu_y + button_spacing*4, 30, 30, "J", OLIVE, (200, 200, 100), 
+                      action=lambda: self.economy_manager.vehicle_manager.purchase_jeep())
             )
-            Text(
-                parent=self.build_menu,
-                text="Build Menu",
-                position=(0, 0.45, 0),
-                scale=0.7,
-                color=color.white
-            )
-
-            y = 0.25
-            spacing = 0.15
-
-            def add_button(label, col, tooltip, callback):
-                nonlocal y
-                btn = Button(
-                    parent=self.build_menu,
-                    model='cube',               # cube gives some depth
-                    scale=(0.1, 0.1, 0.1),      # 3‐component
-                    position=(0, y, 0),
-                    color=col,
-                    tooltip=Tooltip(tooltip),
-                    on_click=callback
-                )
-                Text(parent=btn, text=label, scale=2, color=color.black, position=(0,0, -0.06))
-                y -= spacing
-
-            add_button('F', color.orange,   "Feeding Station\n$500",
-                       lambda: self.building_manager.place_building("feeding_station", mouse.world_point))
-            add_button('W', color.blue,     "Water Station\n$400",
-                       lambda: self.building_manager.place_building("water_station", mouse.world_point))
-            add_button('P', color.brown,    "Path\n$100",
-                       lambda: self.building_manager.place_building("path", mouse.world_point))
-            add_button('V', color.light_gray, "Viewing Platform\n$700",
-                       lambda: self.building_manager.place_building("viewing_platform", mouse.world_point))
-
-            # FIX: point at the economy_manager we stored earlier
-            add_button('J', color.azure,    "Buy Jeep\n$1000",
-                       lambda: self.economy_manager.vehicle_manager.purchase_jeep())
-
-        elif not show and self.build_menu:
-            destroy(self.build_menu)
-            self.build_menu = None
-
-
+        
+        self.build_toggle_button = Button(menu_x, 10, 100, 30, "Build Menu", GREEN, LIGHT_GREEN, 
+                                         action=self.toggle_build_menu)
+        
+        self.animal_overview_button = Button(menu_x + 110, 10, 140, 30, "Animal Overview", YELLOW, (255, 255, 150), 
+                                          action=self.toggle_animal_overview)
     
-    def select_feeding_station(self):
-        """Select the feeding station building type"""
-        self.building_manager.place_building("feeding_station", mouse.world_point)
-    
-    def select_water_station(self):
-        """Select the water station building type"""
-        self.building_manager.place_building("water_station", mouse.world_point)
-    
-    def select_path(self):
-        """Select the path building type"""
-        self.building_manager.place_building("path", mouse.world_point)
-    
-    def select_viewing_platform(self):
-        """Select the viewing platform building type"""
-        self.building_manager.place_building("viewing_platform", mouse.world_point)
+    def toggle_build_menu(self):
+        """Toggle the building menu"""
+        self.build_menu_active = not self.build_menu_active
+        
+        for button in self.build_buttons:
+            button.active = self.build_menu_active
     
     def toggle_animal_overview(self):
-        """Show or hide the animal overview panel"""
-        if not self.animal_overview:
-            self.animal_overview = Entity(
-                parent=self.ui,
-                model='quad',
-                scale=(0.5, 0.6, 1),
-                position=(0, 0, 0),
-                color=color.rgba(0, 0, 0, 200)
-            )
-            
-            Text(
-                parent=self.animal_overview,
-                text="Animal Overview",
-                position=(0, 0.45, 0),
-                scale=0.7,
-                color=color.white
-            )
-            
-            Button(
-                parent=self.animal_overview,
-                model='circle',
-                scale=0.03,
-                position=(0.45, 0.45, 0),
-                color=color.red,
-                highlight_color=color.dark_gray,
-                text="X",
-                on_click=self.toggle_animal_overview
-            )
-            
-            self.animal_content = Entity(parent=self.animal_overview)
-            self.update_animal_overview()
-        else:
-            destroy(self.animal_overview)
-            self.animal_overview = None
+        """Toggle the animal overview panel"""
+        self.animal_overview_active = not self.animal_overview_active
     
-    def update_animal_overview(self):
-        """Update the animal overview panel with current stats"""
-        if not self.animal_overview:
-            return
-        
-        destroy(self.animal_content)
-        self.animal_content = Entity(parent=self.animal_overview)
-        
-        species_stats = {}
-        for species in self.animal_manager.species_config:
-            group = [a for a in self.animal_manager.animals if a.species == species]
-            pop = len(group)
-            if pop:
-                avg_health = sum(a.health for a in group) / pop
-                avg_hunger = sum(a.hunger for a in group) / pop
-                avg_thirst = sum(a.thirst for a in group) / pop
-            else:
-                avg_health = avg_hunger = avg_thirst = 0
-            species_stats[species] = {
-                "population": pop,
-                "avg_health": avg_health,
-                "avg_hunger": avg_hunger,
-                "avg_thirst": avg_thirst
-            }
-
-        
-        y_pos = 0.3
-        spacing = 0.15
-        
-        for species, stats in species_stats.items():
-            Text(
-                parent=self.animal_content,
-                text=f"{species.capitalize()}: {stats['population']}",
-                position=(-0.2, y_pos, 0),
-                scale=0.6,
-                color=color.white
-            )
-            
-            health_bg = Entity(
-                parent=self.animal_content,
-                model='quad',
-                scale=(0.2, 0.03, 1),
-                position=(0.15, y_pos, 0),
-                color=color.dark_gray
-            )
-            
-            health_fill = Entity(
-                parent=health_bg,
-                model='quad',
-                scale=(stats['avg_health']/100, 0.8, 1),
-                position=(-0.5 + stats['avg_health']/200, 0, 0),
-                color=self.get_health_color(stats['avg_health'])
-            )
-            
-            Text(
-                parent=health_bg,
-                text=f"{stats['avg_health']:.1f}%",
-                position=(0, 0, 0),
-                scale=1.5,
-                color=color.black
-            )
-            
-            y_pos -= spacing
+    def select_building(self, building_type):
+        """Select a building type for placement"""
+        self.selected_building = building_type
+        self.game_state.add_notification(f"Selected {building_type} for placement. Click on the map to build.")
     
-    def get_health_color(self, health):
-        """Get a color based on health percentage"""
-        if health > 80:
-            return color.green
-        elif health > 50:
-            return color.yellow
-        elif health > 30:
-            return color.orange
-        else:
-            return color.red
+    def place_selected_building(self, position):
+        """Place the selected building at the given position"""
+        if self.selected_building:
+            self.building_manager.place_building(self.selected_building, position)
     
-    def update(self):
-        """Update UI elements"""
-        self.money_text.text = f"${self.game_state.funds:.2f}"
-        self.ecosystem_text.text = f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%"
+    def draw_resource_display(self, screen):
+        """Draw the resource display (money, etc.)"""
+        pygame.draw.rect(screen, DARK_GRAY, (0, 0, SCREEN_WIDTH, 50))
+        
+        money_text = self.large_font.render(f"${self.game_state.funds:.2f}", True, GREEN)
+        screen.blit(money_text, (SCREEN_WIDTH//2 - 150, 10))
+        
+        eco_text = self.large_font.render(f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%", True, WHITE)
+        screen.blit(eco_text, (SCREEN_WIDTH//2, 10))
         
         tourists = len(self.economy_manager.tourists)
         stars = "★" * int(self.economy_manager.avg_review_score) + "☆" * (5 - int(self.economy_manager.avg_review_score))
-        self.tourist_text.text = f"Tourists: {tourists} ({stars})"
-        
+        tourist_text = self.large_font.render(f"Tourists: {tourists} ({stars})", True, YELLOW)
+        screen.blit(tourist_text, (SCREEN_WIDTH//2 + 250, 10))
+    
+    def draw_time_display(self, screen):
+        """Draw the time display"""
         day_text = f"Day {self.game_state.day}"
         hour = int(self.game_state.time_of_day)
         minute = int((self.game_state.time_of_day - hour) * 60)
         time_text = f"{hour:02d}:{minute:02d}"
-        self.time_text.text = f"{day_text} - {time_text}"
+        
+        full_text = self.large_font.render(f"{day_text} - {time_text}", True, WHITE)
+        screen.blit(full_text, (SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 70))
+        
+        for button in self.time_buttons:
+            button.draw(screen)
+    
+    def draw_notification_area(self, screen):
+        """Draw the notification area"""
+        self.notification_surface.fill((0, 0, 0, 150))
         
         if self.game_state.notifications:
             notifications = self.game_state.notifications[-3:]
-            notification_text = "\n".join([f"{n['time']}: {n['message']}" for n in notifications])
-            self.notification_text.text = notification_text
-        
-        if self.animal_overview:
-            self.update_animal_overview()
-    
-    def show_win_screen(self):
-        """Display the win screen"""
-        self.win_screen = WindowPanel(
-            title='Victory!',
-            content=(
-                f"Congratulations! You have successfully managed your safari park!\n\n"
-                f"Final Balance: ${self.game_state.funds:.2f}\n"
-                f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%\n"
-                f"Days Elapsed: {self.game_state.day}\n"
-                f"Tourist Rating: {self.economy_manager.avg_review_score:.1f}/5\n\n"
-                f"Press [ESC] to exit or click New Game to start again."
-            ),
-            position=(0, 0, 0),
-            scale=(0.6, 0.8),
-            color=color.green.tint(-.2)
-        )
-        
-        Button(
-            parent=self.win_screen,
-            text='New Game',
-            position=(0, -0.2, 0),
-            scale=(0.3, 0.05),
-            color=color.azure,
-            on_click=self.restart_game
-        )
-    
-    def show_lose_screen(self):
-        """Display the lose screen"""
-        self.lose_screen = WindowPanel(
-            title='Game Over',
-            content=(
-                f"Your safari park has failed!\n\n"
-                f"Final Balance: ${self.game_state.funds:.2f}\n"
-                f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%\n"
-                f"Days Elapsed: {self.game_state.day}\n\n"
-                f"Press [ESC] to exit or click Try Again to start over."
-            ),
-            position=(0, 0, 0),
-            scale=(0.6, 0.8),
-            color=color.red.tint(-.2)
-        )
-        
-        Button(
-            parent=self.lose_screen,
-            text='Try Again',
-            position=(0, -0.2, 0),
-            scale=(0.3, 0.05),
-            color=color.azure,
-            on_click=self.restart_game
-        )
-    
-    def restart_game(self):
-        """Restart the game"""
-        import os
-        import sys
-        
-        difficulty = self.game_state.difficulty
-        
-        python = sys.executable
-        os.execl(python, python, *sys.argv, difficulty)
-// File: world.py
-from ursina import Entity, load_texture, color, Plane
-import random
-import noise
-import json
-
-class TerrainGenerator:
-    def __init__(self, game_state, size=64, height_scale=5):
-        self.game_state = game_state
-        self.size = size
-        self.height_scale = height_scale
-        self.terrain_entity = None
-        self.water_entities = []
-        self.vegetation_entities = []
-        
-        self.water_level = 0.3
-        self.grass_level = 0.6
-        self.rocky_level = 0.8
-        
-        self.height_map = self.generate_height_map()
-        self.terrain_types = self.classify_terrain()
-        
-        self.create_terrain()
-        self.add_water()
-        self.add_vegetation()
-    
-    def generate_height_map(self):
-        """Generate a procedural height map using Perlin noise"""
-        height_map = []
-        
-        seed = random.randint(0, 1000)
-        scale = 10.0
-        octaves = 6
-        persistence = 0.5
-        lacunarity = 2.0
-        
-        for z in range(self.size):
-            row = []
-            for x in range(self.size):
-                nx = x / self.size - 0.5
-                nz = z / self.size - 0.5
-                y = noise.pnoise2(nx * scale, 
-                                  nz * scale, 
-                                  octaves=octaves, 
-                                  persistence=persistence, 
-                                  lacunarity=lacunarity,
-                                  repeatx=1024,
-                                  repeaty=1024,
-                                  base=seed)
+            y_offset = 10
+            
+            title = self.medium_font.render("Notifications", True, WHITE)
+            self.notification_surface.blit(title, (10, y_offset))
+            y_offset += 25
+            
+            for notification in notifications:
+                time_text = self.small_font.render(f"{notification['time']}: ", True, LIGHT_GRAY)
+                msg_text = self.small_font.render(notification['message'], True, WHITE)
                 
-                y = (y + 0.5) * self.height_scale
+                self.notification_surface.blit(time_text, (10, y_offset))
+                self.notification_surface.blit(msg_text, (70, y_offset))
                 
-                dist_from_center = ((x - self.size/2)**2 + (z - self.size/2)**2)**0.5
-                center_factor = max(0, 1 - (dist_from_center / (self.size/3)))
-                basin = center_factor * 2
-                
-                y = max(0, y - basin)
-                
-                row.append(y)
-            height_map.append(row)
+                y_offset += 20
         
-        return height_map
+        screen.blit(self.notification_surface, (SCREEN_WIDTH - self.notification_surface.get_width() - 10, 
+                                              SCREEN_HEIGHT - self.notification_surface.get_height() - 10))
     
-    def classify_terrain(self):
-        """Classify terrain types based on height"""
-        terrain_types = []
-        for z in range(self.size):
-            row = []
-            for x in range(self.size):
-                height = self.height_map[z][x]
-                
-                if height < self.water_level:
-                    terrain_type = "water"
-                elif height < self.grass_level:
-                    terrain_type = "grass"
-                elif height < self.rocky_level:
-                    terrain_type = "rocky"
+    def draw_build_menu(self, screen):
+        """Draw the build menu"""
+        self.build_toggle_button.draw(screen)
+        
+        if self.build_menu_active:
+            menu_width = 150
+            menu_height = 250
+            pygame.draw.rect(screen, (0, 0, 0, 180), (5, 55, menu_width, menu_height), border_radius=5)
+            
+            title = self.medium_font.render("Build Menu", True, WHITE)
+            screen.blit(title, (50, 60))
+            
+            for button in self.build_buttons:
+                button.draw(screen)
+            
+            mouse_pos = pygame.mouse.get_pos()
+            for i, button in enumerate(self.build_buttons):
+                if button.rect.collidepoint(mouse_pos) and button.active:
+                    tooltip_text = ""
+                    if i == 0:
+                        tooltip_text = "Feeding Station - $500"
+                    elif i == 1:
+                        tooltip_text = "Water Station - $400"
+                    elif i == 2:
+                        tooltip_text = "Path - $100"
+                    elif i == 3:
+                        tooltip_text = "Viewing Platform - $700"
+                    elif i == 4:
+                        tooltip_text = "Jeep - $1000"
+                    
+                    if tooltip_text:
+                        tooltip = self.small_font.render(tooltip_text, True, WHITE)
+                        tooltip_bg = pygame.Rect(mouse_pos[0], mouse_pos[1] - 25, tooltip.get_width() + 10, 25)
+                        pygame.draw.rect(screen, DARK_GRAY, tooltip_bg)
+                        screen.blit(tooltip, (mouse_pos[0] + 5, mouse_pos[1] - 20))
+    
+    def draw_animal_overview(self, screen):
+        """Draw the animal overview panel"""
+        self.animal_overview_button.draw(screen)
+        
+        if self.animal_overview_active:
+            panel_width = 400
+            panel_height = 300
+            panel_x = (SCREEN_WIDTH - panel_width) // 2
+            panel_y = (SCREEN_HEIGHT - panel_height) // 2
+            
+            pygame.draw.rect(screen, (0, 0, 0, 200), (panel_x, panel_y, panel_width, panel_height), border_radius=10)
+            pygame.draw.rect(screen, WHITE, (panel_x, panel_y, panel_width, panel_height), 2, border_radius=10)
+            
+            title = self.title_font.render("Animal Overview", True, WHITE)
+            screen.blit(title, (panel_x + (panel_width - title.get_width()) // 2, panel_y + 10))
+            
+            close_button = Button(panel_x + panel_width - 30, panel_y + 10, 20, 20, "X", RED, LIGHT_RED, 
+                                action=self.toggle_animal_overview)
+            close_button.draw(screen)
+            
+            species_stats = {}
+            for species in self.animal_manager.species_config:
+                group = [a for a in self.animal_manager.animals if a.species == species]
+                pop = len(group)
+                if pop:
+                    avg_health = sum(a.health for a in group) / pop
+                    avg_hunger = sum(a.hunger for a in group) / pop
+                    avg_thirst = sum(a.thirst for a in group) / pop
                 else:
-                    terrain_type = "mountain"
+                    avg_health = avg_hunger = avg_thirst = 0
+                species_stats[species] = {
+                    "population": pop,
+                    "avg_health": avg_health,
+                    "avg_hunger": avg_hunger,
+                    "avg_thirst": avg_thirst
+                }
+            
+            y_pos = panel_y + 50
+            spacing = 30
+            
+            for species, stats in species_stats.items():
+                species_text = self.medium_font.render(f"{species.capitalize()}: {stats['population']}", True, WHITE)
+                screen.blit(species_text, (panel_x + 20, y_pos))
                 
-                row.append(terrain_type)
-            terrain_types.append(row)
+                bar_x = panel_x + 200
+                bar_y = y_pos + 5
+                bar_width = 150
+                bar_height = 15
+                
+                pygame.draw.rect(screen, DARK_GRAY, (bar_x, bar_y, bar_width, bar_height))
+                
+                health_width = max(0, bar_width * stats['avg_health'] / 100)
+                health_color = self.get_health_color(stats['avg_health'])
+                pygame.draw.rect(screen, health_color, (bar_x, bar_y, health_width, bar_height))
+                
+                health_text = self.small_font.render(f"{stats['avg_health']:.1f}%", True, BLACK)
+                screen.blit(health_text, (bar_x + bar_width // 2 - health_text.get_width() // 2, bar_y))
+                
+                y_pos += spacing
+            
+            eco_balance_text = self.medium_font.render(f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%", True, WHITE)
+            screen.blit(eco_balance_text, (panel_x + 20, panel_y + panel_height - 40))
+    
+    def get_health_color(self, health):
+        """Get a color based on health percentage"""
+        if health > 80:
+            return GREEN
+        elif health > 50:
+            return YELLOW
+        elif health > 30:
+            return ORANGE
+        else:
+            return RED
+    
+    def draw_building_preview(self, screen, camera_offset, mouse_pos):
+        """Draw a preview of the building at mouse position"""
+        if not self.selected_building:
+            return
+            
+        world_x = mouse_pos[0] + camera_offset[0]
+        world_y = mouse_pos[1] + camera_offset[1]
+        world_pos = (world_x, world_y)
         
-        return terrain_types
+        config = self.building_manager.building_config[self.selected_building]
+        
+        width = int(config['scale'][0] * TILE_SIZE)
+        height = int(config['scale'][1] * TILE_SIZE)
+        
+        preview = pygame.Surface((width, height), pygame.SRCALPHA)
+        
+        color_with_alpha = (*config['color'][:3], 150)
+        preview.fill(color_with_alpha)
+        
+        screen_pos = (mouse_pos[0] - width // 2, mouse_pos[1] - height // 2)
+        
+        screen.blit(preview, screen_pos)
+        
+        valid_position = (self.building_manager.terrain.is_suitable_for_building(world_pos) and
+                        not self.building_manager.is_position_occupied(world_pos))
+        
+        indicator_color = GREEN if valid_position else RED
+        pygame.draw.rect(screen, indicator_color, (screen_pos[0], screen_pos[1], width, height), 2)
     
-    def create_terrain(self):
-        """Create the 3D terrain entity"""
-        self.terrain_entity = Entity(
-            model=Plane(subdivisions=(self.size, self.size)),
-            scale=(self.size, 1, self.size),
-            position=(0, 0, 0),
-            collider='mesh',
-            name='terrain'
-        )
-
-        verts = self.terrain_entity.model.vertices
-        for i, vert in enumerate(verts):
-            x = int((vert[0] + 0.5) * self.size)
-            z = int((vert[2] + 0.5) * self.size)
-            x = max(0, min(x, self.size - 1))
-            z = max(0, min(z, self.size - 1))
-            height = self.height_map[z][x]
-            verts[i] = (vert[0], height, vert[2])
-        self.terrain_entity.model.vertices = verts
-        self.terrain_entity.model.generate()
-
-        # use the built-in white cube texture, tinted green
-        self.terrain_entity.texture = load_texture('white_cube')
-        self.terrain_entity.color   = color.green.tint(-.3)
-
+    def draw_cursor_info(self, screen, camera_offset, mouse_pos):
+        """Draw information about what's under the cursor"""
+        world_x = mouse_pos[0] + camera_offset[0]
+        world_y = mouse_pos[1] + camera_offset[1]
+        world_pos = (world_x, world_y)
+        
+        terrain_type = self.building_manager.terrain.get_terrain_at_position(world_pos)
+        
+        info_text = f"Terrain: {terrain_type.capitalize()}"
+        
+        for building in self.building_manager.buildings:
+            if distance(building.position, world_pos) < TILE_SIZE:
+                info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                break
+        
+        for animal in self.animal_manager.animals:
+            if distance(animal.position, world_pos) < TILE_SIZE:
+                info_text += f" | {animal.species.capitalize()} (H:{animal.health:.0f}% F:{animal.hunger:.0f}% W:{animal.thirst:.0f}%)"
+                break
+        
+        info_surface = self.small_font.render(info_text, True, WHITE)
+        screen.blit(info_surface, (10, SCREEN_HEIGHT - 20))
     
-    def add_water(self):
-        """Add water entities at water locations"""
-        water_plane = Entity(
-            model=Plane(subdivisions=(1,1)),
-            scale=(self.size*1.2, 1, self.size*1.2),
-            position=(0, self.water_level-0.1, 0),
-            texture=load_texture('white_cube'),
-            color=color.rgba(0, 150, 255, 150),
-            name='water'
-        )
-        self.water_entities.append(water_plane)
-
-    def add_vegetation(self):
-        """Add trees and bushes to the terrain"""
-        random.seed(42)
-
-        num_trees = int(self.size * self.size * 0.01)
-        num_bushes = int(self.size * self.size * 0.02)
-
-        for _ in range(num_trees):
-            x = random.randint(0, self.size - 1)
-            z = random.randint(0, self.size - 1)
-
-            if self.terrain_types[z][x] == "grass":
-                height = self.height_map[z][x]
-                world_x = x - self.size / 2
-                world_z = z - self.size / 2
-
-                # Tree trunk
-                trunk = Entity(
-                    model='cube',
-                    scale=(0.3, 0.8, 0.3),
-                    position=(world_x, height + 0.4, world_z),
-                    color=color.brown,
-                    name='tree_trunk'
-                )
-
-                # Tree canopy
-                canopy = Entity(
-                    model='sphere',
-                    scale=(1, 1, 1),
-                    position=(world_x, height + 1.2, world_z),
-                    color=color.green,
-                    name='tree_canopy'
-                )
-
-                self.vegetation_entities.append(trunk)
-                self.vegetation_entities.append(canopy)
-
-        for _ in range(num_bushes):
-            x = random.randint(0, self.size - 1)
-            z = random.randint(0, self.size - 1)
-
-            if self.terrain_types[z][x] == "grass":
-                height = self.height_map[z][x]
-
-                bush = Entity(
-                    model='sphere',
-                    scale=(0.8, 0.5, 0.8),
-                    position=(x - self.size/2, height + 0.25, z - self.size/2),
-                    color=color.rgba(0, 100, 0, 255),
-                    name='bush'
-                )
-                self.vegetation_entities.append(bush)
-
+    def draw(self, screen, camera_offset, mouse_pos):
+        """Draw all UI elements"""
+        self.draw_resource_display(screen)
+        self.draw_time_display(screen)
+        self.draw_notification_area(screen)
+        self.draw_build_menu(screen)
+        
+        if self.animal_overview_active:
+            self.draw_animal_overview(screen)
+        else:
+            self.animal_overview_button.draw(screen)
+        
+        if self.selected_building:
+            self.draw_building_preview(screen, camera_offset, mouse_pos)
+        
+        self.draw_cursor_info(screen, camera_offset, mouse_pos)
     
-    def get_height_at_position(self, position):
-        """Get the terrain height at the given world position"""
-        x = int(position[0] + self.size/2)
-        z = int(position[2] + self.size/2)
-        x = max(0, min(x, self.size - 1))
-        z = max(0, min(z, self.size - 1))
-        return self.height_map[z][x]
+    def handle_event(self, event, camera_offset):
+        """Handle UI events"""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.build_toggle_button.handle_event(event)
+            self.animal_overview_button.handle_event(event)
+            
+            for button in self.time_buttons:
+                if button.handle_event(event):
+                    return True
+            
+            if self.build_menu_active:
+                for button in self.build_buttons:
+                    if button.handle_event(event):
+                        return True
+            
+            if self.selected_building and not self.animal_overview_active:
+                mouse_pos = pygame.mouse.get_pos()
+                world_x = mouse_pos[0] + camera_offset[0]
+                world_y = mouse_pos[1] + camera_offset[1]
+                world_pos = (world_x, world_y)
+                
+                self.place_selected_building(world_pos)
+                return True
+        
+        return False
+
+// File: vehicle.py
+import pygame
+from constants import *
+
+class VehicleManager:
+    def __init__(self, game_state, buildings, terrain):
+        self.game_state = game_state
+        self.buildings = buildings
+        self.terrain = terrain
+        self.vehicles = []
+        self.vehicles_group = pygame.sprite.Group()
     
-    def get_terrain_type_at_position(self, position):
-        """Get the terrain type at the given world position"""
-        x = int(position[0] + self.size/2)
-        z = int(position[2] + self.size/2)
-        x = max(0, min(x, self.size - 1))
-        z = max(0, min(z, self.size - 1))
-        return self.terrain_types[z][x]
-    
-    def is_water_at_position(self, position):
-        """Check if there is water at the given position"""
-        return self.get_terrain_type_at_position(position) == "water"
-    
-    def is_suitable_for_building(self, position):
-        """Check if the given position is suitable for building"""
-        return self.get_terrain_type_at_position(position) == "grass"
-    
-    def save_terrain(self, filename="terrain.json"):
-        """Save terrain data to a file"""
-        terrain_data = {
-            "size": self.size,
-            "height_scale": self.height_scale,
-            "height_map": self.height_map,
-            "terrain_types": self.terrain_types
-        }
-        with open(filename, 'w') as f:
-            json.dump(terrain_data, f)
+    def purchase_jeep(self):
+        """Purchase a jeep for the park"""
+        cost = 1000
+        if self.game_state.funds < cost:
+            self.game_state.add_notification("Not enough funds to purchase a jeep")
+            return False
+        
+        self.game_state.add_funds(-cost)
+        self.game_state.add_notification("Purchased a safari jeep!")
+        
+        # Create jeep sprite
+        jeep = pygame.sprite.Sprite()
+        jeep_size = (int(TILE_SIZE * 1.5), int(TILE_SIZE))
+        jeep.image = pygame.Surface(jeep_size, pygame.SRCALPHA)
+        jeep.image.fill(OLIVE)
+        jeep.rect = jeep.image.get_rect()
+        jeep.rect.center = (0, 0)
+        jeep.position = (0, 0)
+        
+        self.vehicles.append(jeep)
+        self.vehicles_group.add(jeep)
         return True
     
-    def load_terrain(self, filename="terrain.json"):
-        """Load terrain data from a file"""
-        try:
-            with open(filename, 'r') as f:
-                terrain_data = json.load(f)
-            self.size = terrain_data["size"]
-            self.height_scale = terrain_data["height_scale"]
-            self.height_map = terrain_data["height_map"]
-            self.terrain_types = terrain_data["terrain_types"]
-            self.create_terrain()
-            self.add_water()
-            self.add_vegetation()
-            return True
-        except Exception as e:
-            print(f"Error loading terrain: {str(e)}")
-            return False
+    def update(self, dt):
+        """Update vehicles (minimal implementation)"""
+        for vehicle in self.vehicles:
+            if random.random() < 0.02:
+                terrain_size = self.terrain.size * TILE_SIZE / 3
+                target_x = random.uniform(-terrain_size, terrain_size)
+                target_y = random.uniform(-terrain_size, terrain_size)
+                
+                # Set up movement animation (simplified)
+                curr_x, curr_y = vehicle.position
+                dx = (target_x - curr_x) / (5 * FPS) # Move over 5 seconds
+                dy = (target_y - curr_y) / (5 * FPS)
+                
+                vehicle.dx = dx
+                vehicle.dy = dy
+                vehicle.move_timer = 5 * FPS
+            
+            if hasattr(vehicle, 'move_timer') and vehicle.move_timer > 0:
+                # Continue animation
+                vehicle.position = (vehicle.position[0] + vehicle.dx, 
+                                   vehicle.position[1] + vehicle.dy)
+                vehicle.rect.center = vehicle.position
+                vehicle.move_timer -= 1
+    
+    def render(self, screen, camera_offset):
+        """Render all vehicles with camera offset"""
+        for vehicle in self.vehicles:
+            # Check if vehicle is within visible area before rendering
+            screen_pos = (vehicle.position[0] - camera_offset[0], 
+                         vehicle.position[1] - camera_offset[1])
+            
+            # Skip rendering if completely off-screen
+            if (screen_pos[0] < -100 or screen_pos[0] > SCREEN_WIDTH + 100 or
+                screen_pos[1] < -100 or screen_pos[1] > SCREEN_HEIGHT + 100):
+                continue
+            
+            # Calculate position accounting for image size and center
+            rect = vehicle.image.get_rect()
+            rect.center = screen_pos
+            
+            screen.blit(vehicle.image, rect)
+
 

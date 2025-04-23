@@ -1,6 +1,7 @@
-from ursina import *
-from ursina.prefabs.dropdown_menu import DropdownMenu
-from ursina.prefabs.tooltip import Tooltip
+import pygame
+from constants import *
+from components import Button
+from utils import distance
 
 class UIManager:
     def __init__(self, game_state, animal_manager, building_manager, economy_manager):
@@ -9,393 +10,340 @@ class UIManager:
         self.building_manager = building_manager
         self.economy_manager = economy_manager
         
-        self.ui = Entity(parent=camera.ui)
+        self.selected_building = None
+        self.close_button = None
+        self.build_menu_active = False
+        self.animal_overview_active = False
         
-        self.create_resource_display()
+        self.build_buttons = []
+        self.time_buttons = []
         
-        self.build_menu = None
+        self.small_font = pygame.font.SysFont('Arial', 14)
+        self.medium_font = pygame.font.SysFont('Arial', 18)
+        self.large_font = pygame.font.SysFont('Arial', 24)
+        self.title_font = pygame.font.SysFont('Arial', 32)
         
-        self.animal_overview = None
+        self.notification_surface = pygame.Surface((int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)), pygame.SRCALPHA)
         
-        self.create_time_controls()
-        
-        self.create_notification_area()
+        self.create_menu_buttons()
     
-    def create_resource_display(self):
-        """Create the display for resources (money, etc)"""
-        self.resource_bar = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(1, 0.05, 1),
-            position=(0, 0.475, 0),
-            color=color.dark_gray
-        )
+    def create_menu_buttons(self):
+        """Create the UI buttons"""
+        button_y = SCREEN_HEIGHT - 40
+        self.time_buttons = [
+            Button(SCREEN_WIDTH//2 - 90, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(0)),
+            Button(SCREEN_WIDTH//2 - 30, button_y, 60, 30, "Normal", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(1)),
+            Button(SCREEN_WIDTH//2 + 30, button_y, 60, 30, "Fast", GRAY, LIGHT_GRAY, 
+                  action=lambda: self.game_state.set_game_speed(3))
+        ]
         
-        self.money_text = Text(
-            parent=self.resource_bar,
-            text=f"${self.game_state.funds:.2f}",
-            position=(-0.45, 0, 0),
-            scale=0.7,
-            color=color.lime
-        )
+        menu_x = 10
+        menu_y = 60
+        button_spacing = 40
         
-        self.ecosystem_text = Text(
-            parent=self.resource_bar,
-            text=f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%",
-            position=(0, 0, 0),
-            scale=0.7,
-            color=color.white
-        )
+        self.build_buttons = [
+            Button(menu_x, menu_y, 30, 30, "F", ORANGE, LIGHT_RED, 
+                  action=lambda: self.select_building("feeding_station")),
+            Button(menu_x, menu_y + button_spacing, 30, 30, "W", BLUE, (100, 100, 255), 
+                  action=lambda: self.select_building("water_station")),
+            Button(menu_x, menu_y + button_spacing*2, 30, 30, "P", BROWN, (200, 150, 100), 
+                  action=lambda: self.select_building("path")),
+            Button(menu_x, menu_y + button_spacing*3, 30, 30, "V", LIGHT_GRAY, WHITE, 
+                  action=lambda: self.select_building("viewing_platform")),
+        ]
         
-        self.tourist_text = Text(
-            parent=self.resource_bar,
-            text=f"Tourists: 0 (★★★☆☆)",
-            position=(0.45, 0, 0),
-            scale=0.7,
-            color=color.yellow
-        )
-    
-    def create_time_controls(self):
-        """Create the time control buttons"""
-        self.time_bar = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(0.3, 0.05, 1),
-            position=(0, -0.475, 0),
-            color=color.dark_gray
-        )
-        
-        self.time_text = Text(
-            parent=self.time_bar,
-            text=f"Day {self.game_state.day} - {int(self.game_state.time_of_day):02d}:00",
-            position=(0, 0.2, 0),
-            scale=0.7,
-            color=color.white
-        )
-        
-        self.pause_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(-0.12, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="❚❚",
-            on_click=lambda: self.game_state.set_game_speed(0)
-        )
-        
-        self.normal_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(0, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="▶",
-            on_click=lambda: self.game_state.set_game_speed(1)
-        )
-        
-        self.fast_button = Button(
-            parent=self.time_bar,
-            model='circle',
-            scale=0.15,
-            position=(0.12, 0, 0),
-            color=color.gray,
-            highlight_color=color.light_gray,
-            text="▶▶",
-            on_click=lambda: self.game_state.set_game_speed(3)
-        )
-    
-    def create_notification_area(self):
-        """Create the area for game notifications"""
-        self.notification_panel = Entity(
-            parent=self.ui,
-            model='quad',
-            scale=(0.3, 0.15, 1),
-            position=(0.35, -0.35, 0),
-            color=color.rgba(0, 0, 0, 150),
-            visible=True
-        )
-        
-        Text(
-            parent=self.notification_panel,
-            text="Notifications",
-            position=(0, 0.45, 0),
-            scale=0.7,
-            color=color.white
-        )
-        
-        self.notification_text = Text(
-            parent=self.notification_panel,
-            text="Welcome to your safari park!",
-            position=(0, 0, 0),
-            scale=0.5,
-            color=color.light_gray,
-            wordwrap=25
-        )
-    
-    def toggle_build_menu(self, show):
-        """Show or hide the building menu"""
-        if show and not self.build_menu:
-            # parent to our UI canvas
-            self.build_menu = Entity(
-                parent=self.ui,
-                model='quad',
-                scale=(0.2, 0.4, 1),             # <-- 3‐component scale
-                position=(-0.4, 0, 0),           # <-- 3‐component position
-                color=color.rgba(0, 0, 0, 200)
+        if hasattr(self.economy_manager, 'vehicle_manager') and self.economy_manager.vehicle_manager:
+            self.build_buttons.append(
+                Button(menu_x, menu_y + button_spacing*4, 30, 30, "J", OLIVE, (200, 200, 100), 
+                      action=lambda: self.economy_manager.vehicle_manager.purchase_jeep())
             )
-            Text(
-                parent=self.build_menu,
-                text="Build Menu",
-                position=(0, 0.45, 0),
-                scale=0.7,
-                color=color.white
-            )
-
-            y = 0.25
-            spacing = 0.15
-
-            def add_button(label, col, tooltip, callback):
-                nonlocal y
-                btn = Button(
-                    parent=self.build_menu,
-                    model='cube',               # cube gives some depth
-                    scale=(0.1, 0.1, 0.1),      # 3‐component
-                    position=(0, y, 0),
-                    color=col,
-                    tooltip=Tooltip(tooltip),
-                    on_click=callback
-                )
-                Text(parent=btn, text=label, scale=2, color=color.black, position=(0,0, -0.06))
-                y -= spacing
-
-            add_button('F', color.orange,   "Feeding Station\n$500",
-                       lambda: self.building_manager.place_building("feeding_station", mouse.world_point))
-            add_button('W', color.blue,     "Water Station\n$400",
-                       lambda: self.building_manager.place_building("water_station", mouse.world_point))
-            add_button('P', color.brown,    "Path\n$100",
-                       lambda: self.building_manager.place_building("path", mouse.world_point))
-            add_button('V', color.light_gray, "Viewing Platform\n$700",
-                       lambda: self.building_manager.place_building("viewing_platform", mouse.world_point))
-
-            # FIX: point at the economy_manager we stored earlier
-            add_button('J', color.azure,    "Buy Jeep\n$1000",
-                       lambda: self.economy_manager.vehicle_manager.purchase_jeep())
-
-        elif not show and self.build_menu:
-            destroy(self.build_menu)
-            self.build_menu = None
-
-
+        
+        self.build_toggle_button = Button(menu_x, 10, 100, 30, "Build Menu", GREEN, LIGHT_GREEN, 
+                                         action=self.toggle_build_menu)
+        
+        self.animal_overview_button = Button(menu_x + 110, 10, 140, 30, "Animal Overview", YELLOW, (255, 255, 150), 
+                                          action=self.toggle_animal_overview)
     
-    def select_feeding_station(self):
-        """Select the feeding station building type"""
-        self.building_manager.place_building("feeding_station", mouse.world_point)
-    
-    def select_water_station(self):
-        """Select the water station building type"""
-        self.building_manager.place_building("water_station", mouse.world_point)
-    
-    def select_path(self):
-        """Select the path building type"""
-        self.building_manager.place_building("path", mouse.world_point)
-    
-    def select_viewing_platform(self):
-        """Select the viewing platform building type"""
-        self.building_manager.place_building("viewing_platform", mouse.world_point)
+    def toggle_build_menu(self):
+        """Toggle the building menu"""
+        self.build_menu_active = not self.build_menu_active
+        
+        for button in self.build_buttons:
+            button.active = self.build_menu_active
     
     def toggle_animal_overview(self):
-        """Show or hide the animal overview panel"""
-        if not self.animal_overview:
-            self.animal_overview = Entity(
-                parent=self.ui,
-                model='quad',
-                scale=(0.5, 0.6, 1),
-                position=(0, 0, 0),
-                color=color.rgba(0, 0, 0, 200)
-            )
-            
-            Text(
-                parent=self.animal_overview,
-                text="Animal Overview",
-                position=(0, 0.45, 0),
-                scale=0.7,
-                color=color.white
-            )
-            
-            Button(
-                parent=self.animal_overview,
-                model='circle',
-                scale=0.03,
-                position=(0.45, 0.45, 0),
-                color=color.red,
-                highlight_color=color.dark_gray,
-                text="X",
-                on_click=self.toggle_animal_overview
-            )
-            
-            self.animal_content = Entity(parent=self.animal_overview)
-            self.update_animal_overview()
-        else:
-            destroy(self.animal_overview)
-            self.animal_overview = None
+        """Toggle the animal overview panel"""
+        self.animal_overview_active = not self.animal_overview_active
     
-    def update_animal_overview(self):
-        """Update the animal overview panel with current stats"""
-        if not self.animal_overview:
-            return
-        
-        destroy(self.animal_content)
-        self.animal_content = Entity(parent=self.animal_overview)
-        
-        species_stats = {}
-        for species in self.animal_manager.species_config:
-            group = [a for a in self.animal_manager.animals if a.species == species]
-            pop = len(group)
-            if pop:
-                avg_health = sum(a.health for a in group) / pop
-                avg_hunger = sum(a.hunger for a in group) / pop
-                avg_thirst = sum(a.thirst for a in group) / pop
-            else:
-                avg_health = avg_hunger = avg_thirst = 0
-            species_stats[species] = {
-                "population": pop,
-                "avg_health": avg_health,
-                "avg_hunger": avg_hunger,
-                "avg_thirst": avg_thirst
-            }
-
-        
-        y_pos = 0.3
-        spacing = 0.15
-        
-        for species, stats in species_stats.items():
-            Text(
-                parent=self.animal_content,
-                text=f"{species.capitalize()}: {stats['population']}",
-                position=(-0.2, y_pos, 0),
-                scale=0.6,
-                color=color.white
-            )
-            
-            health_bg = Entity(
-                parent=self.animal_content,
-                model='quad',
-                scale=(0.2, 0.03, 1),
-                position=(0.15, y_pos, 0),
-                color=color.dark_gray
-            )
-            
-            health_fill = Entity(
-                parent=health_bg,
-                model='quad',
-                scale=(stats['avg_health']/100, 0.8, 1),
-                position=(-0.5 + stats['avg_health']/200, 0, 0),
-                color=self.get_health_color(stats['avg_health'])
-            )
-            
-            Text(
-                parent=health_bg,
-                text=f"{stats['avg_health']:.1f}%",
-                position=(0, 0, 0),
-                scale=1.5,
-                color=color.black
-            )
-            
-            y_pos -= spacing
+    def select_building(self, building_type):
+        """Select a building type for placement"""
+        self.selected_building = building_type
+        self.game_state.add_notification(f"Selected {building_type} for placement. Click on the map to build.")
     
-    def get_health_color(self, health):
-        """Get a color based on health percentage"""
-        if health > 80:
-            return color.green
-        elif health > 50:
-            return color.yellow
-        elif health > 30:
-            return color.orange
-        else:
-            return color.red
+    def place_selected_building(self, position):
+        """Place the selected building at the given position"""
+        if self.selected_building:
+            self.building_manager.place_building(self.selected_building, position)
     
-    def update(self):
-        """Update UI elements"""
-        self.money_text.text = f"${self.game_state.funds:.2f}"
-        self.ecosystem_text.text = f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%"
+    def draw_resource_display(self, screen):
+        """Draw the resource display (money, etc.)"""
+        pygame.draw.rect(screen, DARK_GRAY, (0, 0, SCREEN_WIDTH, 50))
+        
+        money_text = self.large_font.render(f"${self.game_state.funds:.2f}", True, GREEN)
+        screen.blit(money_text, (SCREEN_WIDTH//2 - 150, 10))
+        
+        eco_text = self.large_font.render(f"Ecosystem: {self.game_state.ecosystem_balance:.1f}%", True, WHITE)
+        screen.blit(eco_text, (SCREEN_WIDTH//2, 10))
         
         tourists = len(self.economy_manager.tourists)
         stars = "★" * int(self.economy_manager.avg_review_score) + "☆" * (5 - int(self.economy_manager.avg_review_score))
-        self.tourist_text.text = f"Tourists: {tourists} ({stars})"
-        
+        tourist_text = self.large_font.render(f"Tourists: {tourists} ({stars})", True, YELLOW)
+        screen.blit(tourist_text, (SCREEN_WIDTH//2 + 250, 10))
+    
+    def draw_time_display(self, screen):
+        """Draw the time display"""
         day_text = f"Day {self.game_state.day}"
         hour = int(self.game_state.time_of_day)
         minute = int((self.game_state.time_of_day - hour) * 60)
         time_text = f"{hour:02d}:{minute:02d}"
-        self.time_text.text = f"{day_text} - {time_text}"
+        
+        full_text = self.large_font.render(f"{day_text} - {time_text}", True, WHITE)
+        screen.blit(full_text, (SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 70))
+        
+        for button in self.time_buttons:
+            button.draw(screen)
+    
+    def draw_notification_area(self, screen):
+        """Draw the notification area"""
+        self.notification_surface.fill((0, 0, 0, 150))
         
         if self.game_state.notifications:
             notifications = self.game_state.notifications[-3:]
-            notification_text = "\n".join([f"{n['time']}: {n['message']}" for n in notifications])
-            self.notification_text.text = notification_text
+            y_offset = 10
+            
+            title = self.medium_font.render("Notifications", True, WHITE)
+            self.notification_surface.blit(title, (10, y_offset))
+            y_offset += 25
+            
+            for notification in notifications:
+                time_text = self.small_font.render(f"{notification['time']}: ", True, LIGHT_GRAY)
+                msg_text = self.small_font.render(notification['message'], True, WHITE)
+                
+                self.notification_surface.blit(time_text, (10, y_offset))
+                self.notification_surface.blit(msg_text, (70, y_offset))
+                
+                y_offset += 20
         
-        if self.animal_overview:
-            self.update_animal_overview()
+        screen.blit(self.notification_surface, (SCREEN_WIDTH - self.notification_surface.get_width() - 10, 
+                                              SCREEN_HEIGHT - self.notification_surface.get_height() - 10))
     
-    def show_win_screen(self):
-        """Display the win screen"""
-        self.win_screen = WindowPanel(
-            title='Victory!',
-            content=(
-                f"Congratulations! You have successfully managed your safari park!\n\n"
-                f"Final Balance: ${self.game_state.funds:.2f}\n"
-                f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%\n"
-                f"Days Elapsed: {self.game_state.day}\n"
-                f"Tourist Rating: {self.economy_manager.avg_review_score:.1f}/5\n\n"
-                f"Press [ESC] to exit or click New Game to start again."
-            ),
-            position=(0, 0, 0),
-            scale=(0.6, 0.8),
-            color=color.green.tint(-.2)
-        )
+    def draw_build_menu(self, screen):
+        """Draw the build menu"""
+        self.build_toggle_button.draw(screen)
         
-        Button(
-            parent=self.win_screen,
-            text='New Game',
-            position=(0, -0.2, 0),
-            scale=(0.3, 0.05),
-            color=color.azure,
-            on_click=self.restart_game
-        )
+        if self.build_menu_active:
+            menu_width = 150
+            menu_height = 250
+            pygame.draw.rect(screen, (0, 0, 0, 180), (5, 55, menu_width, menu_height), border_radius=5)
+            
+            title = self.medium_font.render("Build Menu", True, WHITE)
+            screen.blit(title, (50, 60))
+            
+            for button in self.build_buttons:
+                button.draw(screen)
+            
+            mouse_pos = pygame.mouse.get_pos()
+            for i, button in enumerate(self.build_buttons):
+                if button.rect.collidepoint(mouse_pos) and button.active:
+                    tooltip_text = ""
+                    if i == 0:
+                        tooltip_text = "Feeding Station - $500"
+                    elif i == 1:
+                        tooltip_text = "Water Station - $400"
+                    elif i == 2:
+                        tooltip_text = "Path - $100"
+                    elif i == 3:
+                        tooltip_text = "Viewing Platform - $700"
+                    elif i == 4:
+                        tooltip_text = "Jeep - $1000"
+                    
+                    if tooltip_text:
+                        tooltip = self.small_font.render(tooltip_text, True, WHITE)
+                        tooltip_bg = pygame.Rect(mouse_pos[0], mouse_pos[1] - 25, tooltip.get_width() + 10, 25)
+                        pygame.draw.rect(screen, DARK_GRAY, tooltip_bg)
+                        screen.blit(tooltip, (mouse_pos[0] + 5, mouse_pos[1] - 20))
     
-    def show_lose_screen(self):
-        """Display the lose screen"""
-        self.lose_screen = WindowPanel(
-            title='Game Over',
-            content=(
-                f"Your safari park has failed!\n\n"
-                f"Final Balance: ${self.game_state.funds:.2f}\n"
-                f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%\n"
-                f"Days Elapsed: {self.game_state.day}\n\n"
-                f"Press [ESC] to exit or click Try Again to start over."
-            ),
-            position=(0, 0, 0),
-            scale=(0.6, 0.8),
-            color=color.red.tint(-.2)
-        )
+    def draw_animal_overview(self, screen):
+        """Draw the animal overview panel"""
+        self.animal_overview_button.draw(screen)
         
-        Button(
-            parent=self.lose_screen,
-            text='Try Again',
-            position=(0, -0.2, 0),
-            scale=(0.3, 0.05),
-            color=color.azure,
-            on_click=self.restart_game
-        )
+        if self.animal_overview_active:
+            panel_width = 400
+            panel_height = 300
+            panel_x = (SCREEN_WIDTH - panel_width) // 2
+            panel_y = (SCREEN_HEIGHT - panel_height) // 2
+            
+            pygame.draw.rect(screen, (0, 0, 0, 200), (panel_x, panel_y, panel_width, panel_height), border_radius=10)
+            pygame.draw.rect(screen, WHITE, (panel_x, panel_y, panel_width, panel_height), 2, border_radius=10)
+            
+            title = self.title_font.render("Animal Overview", True, WHITE)
+            screen.blit(title, (panel_x + (panel_width - title.get_width()) // 2, panel_y + 10))
+            
+            self.close_button = Button(panel_x + panel_width - 30, panel_y + 10, 20, 20, "X", RED, LIGHT_RED, 
+                                    action=self.toggle_animal_overview)
+            self.close_button.draw(screen)
+
+            species_stats = {}
+            for species in self.animal_manager.species_config:
+                group = [a for a in self.animal_manager.animals if a.species == species]
+                pop = len(group)
+                if pop:
+                    avg_health = sum(a.health for a in group) / pop
+                    avg_hunger = sum(a.hunger for a in group) / pop
+                    avg_thirst = sum(a.thirst for a in group) / pop
+                else:
+                    avg_health = avg_hunger = avg_thirst = 0
+                species_stats[species] = {
+                    "population": pop,
+                    "avg_health": avg_health,
+                    "avg_hunger": avg_hunger,
+                    "avg_thirst": avg_thirst
+                }
+            
+            y_pos = panel_y + 50
+            spacing = 30
+            
+            for species, stats in species_stats.items():
+                species_text = self.medium_font.render(f"{species.capitalize()}: {stats['population']}", True, WHITE)
+                screen.blit(species_text, (panel_x + 20, y_pos))
+                
+                bar_x = panel_x + 200
+                bar_y = y_pos + 5
+                bar_width = 150
+                bar_height = 15
+                
+                pygame.draw.rect(screen, DARK_GRAY, (bar_x, bar_y, bar_width, bar_height))
+                
+                health_width = max(0, bar_width * stats['avg_health'] / 100)
+                health_color = self.get_health_color(stats['avg_health'])
+                pygame.draw.rect(screen, health_color, (bar_x, bar_y, health_width, bar_height))
+                
+                health_text = self.small_font.render(f"{stats['avg_health']:.1f}%", True, BLACK)
+                screen.blit(health_text, (bar_x + bar_width // 2 - health_text.get_width() // 2, bar_y))
+                
+                y_pos += spacing
+            
+            eco_balance_text = self.medium_font.render(f"Ecosystem Balance: {self.game_state.ecosystem_balance:.1f}%", True, WHITE)
+            screen.blit(eco_balance_text, (panel_x + 20, panel_y + panel_height - 40))
     
-    def restart_game(self):
-        """Restart the game"""
-        import os
-        import sys
+    def get_health_color(self, health):
+        """Get a color based on health percentage"""
+        if health > 80:
+            return GREEN
+        elif health > 50:
+            return YELLOW
+        elif health > 30:
+            return ORANGE
+        else:
+            return RED
+    
+    def draw_building_preview(self, screen, camera_offset, mouse_pos):
+        """Draw a preview of the building at mouse position"""
+        if not self.selected_building:
+            return
+            
+        world_x = mouse_pos[0] + camera_offset[0]
+        world_y = mouse_pos[1] + camera_offset[1]
+        world_pos = (world_x, world_y)
         
-        difficulty = self.game_state.difficulty
+        config = self.building_manager.building_config[self.selected_building]
         
-        python = sys.executable
-        os.execl(python, python, *sys.argv, difficulty)
+        width = int(config['scale'][0] * TILE_SIZE)
+        height = int(config['scale'][1] * TILE_SIZE)
+        
+        preview = pygame.Surface((width, height), pygame.SRCALPHA)
+        
+        color_with_alpha = (*config['color'][:3], 150)
+        preview.fill(color_with_alpha)
+        
+        screen_pos = (mouse_pos[0] - width // 2, mouse_pos[1] - height // 2)
+        
+        screen.blit(preview, screen_pos)
+        
+        valid_position = (self.building_manager.terrain.is_suitable_for_building(world_pos) and
+                        not self.building_manager.is_position_occupied(world_pos))
+        
+        indicator_color = GREEN if valid_position else RED
+        pygame.draw.rect(screen, indicator_color, (screen_pos[0], screen_pos[1], width, height), 2)
+    
+    def draw_cursor_info(self, screen, camera_offset, mouse_pos):
+        """Draw information about what's under the cursor"""
+        world_x = mouse_pos[0] + camera_offset[0]
+        world_y = mouse_pos[1] + camera_offset[1]
+        world_pos = (world_x, world_y)
+        
+        terrain_type = self.building_manager.terrain.get_terrain_at_position(world_pos)
+        
+        info_text = f"Terrain: {terrain_type.capitalize()}"
+        
+        for building in self.building_manager.buildings:
+            if distance(building.position, world_pos) < TILE_SIZE:
+                info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                break
+        
+        for animal in self.animal_manager.animals:
+            if distance(animal.position, world_pos) < TILE_SIZE:
+                info_text += f" | {animal.species.capitalize()} (H:{animal.health:.0f}% F:{animal.hunger:.0f}% W:{animal.thirst:.0f}%)"
+                break
+        
+        info_surface = self.small_font.render(info_text, True, WHITE)
+        screen.blit(info_surface, (10, SCREEN_HEIGHT - 20))
+    
+    def draw(self, screen, camera_offset, mouse_pos):
+        """Draw all UI elements"""
+        self.draw_resource_display(screen)
+        self.draw_time_display(screen)
+        self.draw_notification_area(screen)
+        self.draw_build_menu(screen)
+        
+        if self.animal_overview_active:
+            self.draw_animal_overview(screen)
+        else:
+            self.animal_overview_button.draw(screen)
+        
+        if self.selected_building:
+            self.draw_building_preview(screen, camera_offset, mouse_pos)
+        
+        self.draw_cursor_info(screen, camera_offset, mouse_pos)
+    
+    def handle_event(self, event, camera_offset):
+        """Handle UI events"""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.build_toggle_button.handle_event(event)
+            self.animal_overview_button.handle_event(event)
+            
+            for button in self.time_buttons:
+                if button.handle_event(event):
+                    return True
+
+            if self.build_menu_active:
+                for button in self.build_buttons:
+                    if button.handle_event(event):
+                        return True
+
+            if self.animal_overview_active and self.close_button:
+                if self.close_button.handle_event(event):
+                    return True
+
+            if self.selected_building and not self.animal_overview_active:
+                mouse_pos = pygame.mouse.get_pos()
+                world_x = mouse_pos[0] + camera_offset[0]
+                world_y = mouse_pos[1] + camera_offset[1]
+                world_pos = (world_x, world_y)
+
+                self.place_selected_building(world_pos)
+                return True
+
+        return False
