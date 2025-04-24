@@ -1,4 +1,5 @@
 import pygame
+import json
 from datetime import datetime
 from constants import *
 
@@ -15,18 +16,33 @@ class GameSpeed:
         WEEK:   "Week"
     }
 class GameState:
-    def __init__(self, difficulty="medium"):
+    def __init__(self, difficulty="medium", day=1, time_of_day=0, funds=None, ecosystem_balance=100):
         self.difficulty = difficulty
-        self.day = 1
-        self.time_of_day = 0
+        self.day = day
+        self.time_of_day = time_of_day
         self.game_speed = 0
         self.time_elapsed = 0
-        
+
         self.load_difficulty_settings()
-        
+
+        if funds is not None:
+            self.funds = funds
+
         self.animal_stats = {}
-        self.ecosystem_balance = 100
+        self.ecosystem_balance = ecosystem_balance
         self.notifications = []
+    
+    @classmethod
+    def load(cls, filepath):
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        return cls(
+            difficulty=data["difficulty"],
+            day=data["day"],
+            time_of_day=data["time_of_day"],
+            funds=data["funds"],
+            ecosystem_balance=data["ecosystem_balance"]
+        )
     
     def load_difficulty_settings(self):
         self.settings = {

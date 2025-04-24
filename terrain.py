@@ -1,6 +1,7 @@
 import pygame
 import random
 import noise
+import json
 from constants import *
 
 class TerrainGenerator:
@@ -19,6 +20,12 @@ class TerrainGenerator:
         self.entrance_tile = (0, self.size // 2)
         self.exit_tile = (self.size - 1, self.size // 2)
         self.create_terrain_surfaces()
+    
+    @classmethod
+    def load(cls, filepath, game_state):
+        instance = cls(game_state)
+        instance.load_terrain(filepath)
+        return instance
     
     def generate_terrain_grid(self):
         """Generate a 2D terrain grid using Perlin noise"""

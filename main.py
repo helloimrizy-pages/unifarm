@@ -1,44 +1,49 @@
 import sys
 import pygame
-import random
-import math
-from datetime import datetime
-import noise
-import json
-from os import path
-from collections import defaultdict
+import argparse
+from pathlib import Path
 
-from game_state import GameState, GameSpeed
-from terrain import TerrainGenerator
+from game_state      import GameState, GameSpeed
+from terrain         import TerrainGenerator
 from building_manager import BuildingManager
-from animal_manager   import AnimalManager
-from vehicle          import VehicleManager
-from economy_manager  import EconomyManager
-from ui               import UIManager
-from constants        import *
+from animal_manager  import AnimalManager
+from vehicle         import VehicleManager
+from economy_manager import EconomyManager
+from ui              import UIManager
 from game_over_screen import game_over_screen
-
-UI_STATE_MAIN_MENU = "main_menu"
-UI_STATE_SETTINGS = "settings"
-UI_STATE_GAMEPLAY = "gameplay"
+from constants       import *
 
 pygame.init()
-ui_state = UI_STATE_MAIN_MENU
 pygame.font.init()
 
-def main(difficulty='medium'):
-    """Main game function"""
+def main(
+    difficulty: str = "medium",
+    game_state: GameState = None,
+    terrain: TerrainGenerator = None,
+    buildings: BuildingManager = None,
+    animals: AnimalManager = None,
+    economy: EconomyManager = None,
+    vehicles: VehicleManager = None,
+    ui: UIManager = None,
+):
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Safari Park - Pygame Edition")
     clock = pygame.time.Clock()
 
-    game_state = GameState(difficulty)
-    terrain    = TerrainGenerator(game_state)
-    buildings  = BuildingManager(game_state, terrain)
-    animals    = AnimalManager(game_state, terrain)
-    economy    = EconomyManager(game_state, animals, buildings)
-    vehicles   = VehicleManager(game_state, buildings, terrain, economy)
-    ui         = UIManager(game_state, animals, buildings, economy)
+    if game_state is None:
+        game_state = GameState(difficulty)
+    if terrain is None:
+        terrain = TerrainGenerator(game_state)
+    if buildings is None:
+        buildings = BuildingManager(game_state, terrain)
+    if animals is None:
+        animals = AnimalManager(game_state, terrain)
+    if economy is None:
+        economy = EconomyManager(game_state, animals, buildings)
+    if vehicles is None:
+        vehicles = VehicleManager(game_state, buildings, terrain, economy)
+    if ui is None:
+        ui = UIManager(game_state, animals, buildings, economy, terrain)
 
     animals.set_building_manager(buildings)
     animals.update_animal_stats()
@@ -47,45 +52,39 @@ def main(difficulty='medium'):
 
     camera_offset = [0, 0]
     camera_speed  = 500
-
     running = True
-    game_state.set_game_speed(1)
+    game_state.set_game_speed(GameSpeed.HOUR)
 
     while running:
         dt = clock.tick(FPS) / 1000.0
         mouse_pos = pygame.mouse.get_pos()
-        keys      = pygame.key.get_pressed()
+        keys = pygame.key.get_pressed()
 
-        if keys[pygame.K_w]:
-            camera_offset[1] -= camera_speed * dt
-        if keys[pygame.K_s]:
-            camera_offset[1] += camera_speed * dt
-        if keys[pygame.K_a]:
-            camera_offset[0] -= camera_speed * dt
-        if keys[pygame.K_d]:
-            camera_offset[0] += camera_speed * dt
+        if keys[pygame.K_w]: camera_offset[1] -= camera_speed * dt
+        if keys[pygame.K_s]: camera_offset[1] += camera_speed * dt
+        if keys[pygame.K_a]: camera_offset[0] -= camera_speed * dt
+        if keys[pygame.K_d]: camera_offset[0] += camera_speed * dt
 
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_1:
-                    game_state.set_game_speed(GameSpeed.PAUSED)
-                elif event.key == pygame.K_2:
-                    game_state.set_game_speed(GameSpeed.HOUR)
-                elif event.key == pygame.K_3:
-                    game_state.set_game_speed(GameSpeed.DAY)
-                elif event.key == pygame.K_4:
-                    game_state.set_game_speed(GameSpeed.WEEK)
+                if event.key == pygame.K_1: game_state.set_game_speed(GameSpeed.PAUSED)
+                elif event.key == pygame.K_2: game_state.set_game_speed(GameSpeed.HOUR)
+                elif event.key == pygame.K_3: game_state.set_game_speed(GameSpeed.DAY)
+                elif event.key == pygame.K_4: game_state.set_game_speed(GameSpeed.WEEK)
                 elif event.key == pygame.K_b:
                     ui.toggle_build_menu()
                 elif event.key == pygame.K_TAB:
                     ui.toggle_animal_overview()
-                elif event.key == pygame.K_f and ui.build_menu_active:
+                elif ui.build_menu_active and event.key == pygame.K_f:
                     ui.select_building('feeding_station')
-                elif event.key == pygame.K_w and ui.build_menu_active:
+                elif ui.build_menu_active and event.key == pygame.K_w:
                     ui.select_building('water_station')
-                elif event.key == pygame.K_p and ui.build_menu_active:
+                elif ui.build_menu_active and event.key == pygame.K_p:
                     ui.select_building('path')
-                elif event.key == pygame.K_v and ui.build_menu_active:
+                elif ui.build_menu_active and event.key == pygame.K_v:
                     ui.select_building('viewing_platform')
 
             if ui.handle_event(event, camera_offset):
@@ -102,18 +101,16 @@ def main(difficulty='medium'):
         if game_state.check_win_condition():
             result = game_over_screen(screen, ui.title_font, "You Win!")
             if result == 'restart':
-                main(difficulty)
-                return
+                return main(difficulty, game_state=None)
             else:
-                running = False
+                break
 
         if game_state.check_lose_condition():
             result = game_over_screen(screen, ui.title_font, "Game Over")
             if result == 'restart':
-                main(difficulty)
-                return
+                return main(difficulty, game_state=None)
             else:
-                running = False
+                break
 
         screen.fill(BLACK)
         terrain.render(screen, camera_offset)
@@ -128,13 +125,47 @@ def main(difficulty='medium'):
     sys.exit()
 
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        difficulty = sys.argv[1].lower()
-        if difficulty not in ['easy', 'medium', 'hard']:
-            print("Invalid difficulty. Using 'medium' instead.")
-            difficulty = 'medium'
-    else:
-        difficulty = 'medium'
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--load", "-l",
+        help="Path to a saved game folder",
+        type=str
+    )
+    parser.add_argument(
+        "--difficulty", "-d",
+        help="Difficulty level (if starting new)",
+        default="medium"
+    )
+    args = parser.parse_args()
 
-    main(difficulty)
+    if args.load:
+        save_dir = Path(args.load)
+
+        game_state = GameState.load(save_dir / "savegame.json")
+
+        terrain = TerrainGenerator(game_state)
+        terrain.load_terrain(save_dir / "terrain.json")
+
+        buildings = BuildingManager(game_state, terrain)
+        buildings.load_buildings(save_dir / "buildings.json")
+
+        animals = AnimalManager(game_state, terrain)
+        animals.load_animals(save_dir / "animals.json")
+
+        economy = EconomyManager(game_state, animals, buildings)
+        vehicles = VehicleManager(game_state, buildings, terrain, economy)
+        ui       = UIManager(game_state, animals, buildings, economy, terrain)
+
+        main(
+            difficulty    = game_state.difficulty,
+            game_state    = game_state,
+            terrain       = terrain,
+            buildings     = buildings,
+            animals       = animals,
+            economy       = economy,
+            vehicles      = vehicles,
+            ui            = ui
+        )
+    else:
+        main(difficulty=args.difficulty)

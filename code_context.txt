@@ -1335,28 +1335,25 @@ def game_over_screen(screen, title_font, message):
         clock.tick(30)
 
 // File: main_menu.py
+
 import tkinter as tk
 from settings_page import SafariSettingsApp
-from new_game import NewAdventureWindow  # <- Import your class here
+from new_game import NewAdventureWindow
+from load_game import LoadGameWindow
 import pygame
 import os
 
-# Asset path
 ASSET_DIR = "assets"
 
-# Init mixer
 pygame.mixer.init()
 
-# Load sounds
 bg_music = os.path.join(ASSET_DIR, "song.wav")
 roar_sound = os.path.join(ASSET_DIR, "lion-roaring.mp3")
 
-# Load and play background music
 pygame.mixer.music.load(bg_music)
-pygame.mixer.music.set_volume(0.5)  # Default volume
+pygame.mixer.music.set_volume(0.5)
 pygame.mixer.music.play(-1)
 
-# Play roar sound once
 roar = pygame.mixer.Sound(roar_sound)
 roar.set_volume(0.5)
 roar.play()
@@ -1370,7 +1367,15 @@ def open_new_game():
     main_root.withdraw()
     new_game_window = tk.Toplevel()
     NewAdventureWindow(new_game_window, main_root)
-    new_game_window.protocol("WM_DELETE_WINDOW", lambda: (new_game_window.destroy(), main_root.deiconify()))
+    new_game_window.protocol(
+        "WM_DELETE_WINDOW",
+        lambda: (new_game_window.destroy(), main_root.deiconify())
+    )
+
+def open_load_game():
+    main_root.withdraw()
+    load_window = tk.Toplevel()
+    LoadGameWindow(load_window, main_root)
 
 def exit_game():
     main_root.quit()
@@ -1379,7 +1384,7 @@ main_root = tk.Tk()
 main_root.geometry("1024x600")
 main_root.configure(bg="#88c999")
 
-bg_image = tk.PhotoImage(file=os.path.join(ASSET_DIR, "main_menu_image.png"))  # Ensure PNG format
+bg_image = tk.PhotoImage(file=os.path.join(ASSET_DIR, "main_menu_image.png"))
 bg_label = tk.Label(main_root, image=bg_image)
 bg_label.place(relwidth=1, relheight=1)
 
@@ -1387,16 +1392,21 @@ button_frame = tk.Frame(main_root, pady=20)
 button_frame.place(relx=0.5, rely=0.7, anchor="center")
 
 def make_button(text, cmd):
-    return tk.Button(button_frame, text=text, width=18, height=2, font=("Helvetica", 10, "bold"),
-                     bg="#c58b39", activebackground="#a4692f", command=cmd)
+    return tk.Button(
+        button_frame, text=text, width=18, height=2,
+        font=("Helvetica", 10, "bold"),
+        bg="#c58b39", activebackground="#a4692f",
+        command=cmd
+    )
 
 make_button("NEW GAME", open_new_game).grid(row=0, column=0, padx=10)
-make_button("LOAD GAME", lambda: print("Load game")).grid(row=0, column=1, padx=10)
+make_button("LOAD GAME", open_load_game).grid(row=0, column=1, padx=10)
 make_button("SETTINGS", open_settings).grid(row=0, column=2, padx=10)
-make_button("EXIT", exit_game).grid(row=0, column=3, padx=10)
+make_button("EXIT",   exit_game).grid(row=0, column=3, padx=10)
 
 main_root.protocol("WM_DELETE_WINDOW", main_root.quit)
 main_root.mainloop()
+
 // File: main.py
 import sys
 import pygame
@@ -2111,24 +2121,29 @@ class Tourist(pygame.sprite.Sprite):
 // File: ui.py
 
 import pygame
+import sys
+import subprocess
 from constants import *
 from components import Button
 from utils      import distance
 from game_state import GameSpeed
 
 class UIManager:
-    def __init__(self, game_state, animal_manager, building_manager, economy_manager):
+    def __init__(self, game_state, animal_manager, building_manager, economy_manager, terrain):
         self.game_state       = game_state
         self.animal_manager   = animal_manager
         self.building_manager = building_manager
         self.economy_manager  = economy_manager
+        self.terrain          = terrain
 
         self.selected_building      = None
         self.build_menu_active      = False
         self.animal_overview_active = False
+        self.pause_menu_active      = False
 
         self.build_buttons = []
         self.time_buttons  = []
+        self.pause_buttons = []
 
         self.small_font = pygame.font.SysFont('Arial', 14)
         self.medium_font= pygame.font.SysFont('Arial', 18)
@@ -2141,18 +2156,19 @@ class UIManager:
         )
 
         self.create_menu_buttons()
+        self.create_pause_buttons()
 
     def create_menu_buttons(self):
         button_y = SCREEN_HEIGHT - 40
-
+        cx = SCREEN_WIDTH//2
         self.time_buttons = [
-            Button(SCREEN_WIDTH//2 - 150, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY,
+            Button(cx-150, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY,
                    action=lambda: self.game_state.set_game_speed(GameSpeed.PAUSED)),
-            Button(SCREEN_WIDTH//2 -  75, button_y, 60, 30, "Hour",  GRAY, LIGHT_GRAY,
+            Button(cx-75,  button_y, 60, 30, "Hour",  GRAY, LIGHT_GRAY,
                    action=lambda: self.game_state.set_game_speed(GameSpeed.HOUR)),
-            Button(SCREEN_WIDTH//2      , button_y, 60, 30, "Day",   GRAY, LIGHT_GRAY,
+            Button(cx,     button_y, 60, 30, "Day",   GRAY, LIGHT_GRAY,
                    action=lambda: self.game_state.set_game_speed(GameSpeed.DAY)),
-            Button(SCREEN_WIDTH//2 +   75, button_y, 60, 30, "Week",  GRAY, LIGHT_GRAY,
+            Button(cx+75,  button_y, 60, 30, "Week",  GRAY, LIGHT_GRAY,
                    action=lambda: self.game_state.set_game_speed(GameSpeed.WEEK)),
         ]
         
@@ -2183,12 +2199,56 @@ class UIManager:
         self.animal_overview_button = Button(menu_x + 110, 10, 140, 30, "Animal Overview", YELLOW, (255, 255, 150), 
                                           action=self.toggle_animal_overview)
     
+    def create_pause_buttons(self):
+        w, h, gap = 200, 40, 15
+        cx, cy = SCREEN_WIDTH//2, SCREEN_HEIGHT//2
+        labels_actions = [
+            ("Resume",           self.resume_game),
+            ("Save Game",        self.save_all),
+            ("Back to Main Menu",self.back_to_main_menu),
+            ("Exit",             self.exit_game),
+        ]
+        for i,(label,act) in enumerate(labels_actions):
+            btn = Button(
+                cx - w//2, cy - ((len(labels_actions)*h + (len(labels_actions)-1)*gap)//2)
+                + i*(h+gap),
+                w, h, label, DARK_GRAY, LIGHT_GRAY, text_color=WHITE, action=act
+            )
+            self.pause_buttons.append(btn)
+
+    def resume_game(self):
+        self.pause_menu_active = False
+        prev = getattr(self.game_state, 'last_nonzero_speed', GameSpeed.HOUR)
+        self.game_state.set_game_speed(prev)
+
+    def save_all(self):
+        self.game_state.save_game()
+        self.animal_manager.save_animals()
+        self.building_manager.save_buildings()
+        self.terrain.save_terrain()
+    
+    def back_to_main_menu(self):
+        subprocess.Popen([sys.executable, "main_menu.py"])
+        pygame.quit()
+        sys.exit()
+
+    def exit_game(self):
+        pygame.quit()
+        sys.exit()
+    
     def toggle_build_menu(self):
         """Toggle the building menu"""
         self.build_menu_active = not self.build_menu_active
         
         for button in self.build_buttons:
             button.active = self.build_menu_active
+    
+    def toggle_pause_menu(self):
+        self.pause_menu_active = not self.pause_menu_active
+        if self.pause_menu_active:
+            self.game_state.set_game_speed(GameSpeed.PAUSED)
+        else:
+            self.resume_game()
     
     def toggle_animal_overview(self):
         """Toggle the animal overview panel"""
@@ -2422,24 +2482,40 @@ class UIManager:
         screen.blit(info_surface, (10, SCREEN_HEIGHT - 20))
     
     def draw(self, screen, camera_offset, mouse_pos):
-        """Draw all UI elements"""
         self.draw_resource_display(screen)
         self.draw_time_display(screen)
         self.draw_notification_area(screen)
         self.draw_build_menu(screen)
-        
+
         if self.animal_overview_active:
             self.draw_animal_overview(screen)
         else:
             self.animal_overview_button.draw(screen)
-        
+
         if self.selected_building:
             self.draw_building_preview(screen, camera_offset, mouse_pos)
-        
+
         self.draw_cursor_info(screen, camera_offset, mouse_pos)
+
+        if self.pause_menu_active:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0,0,0,180))
+            screen.blit(overlay, (0,0))
+            for b in self.pause_buttons:
+                b.draw(screen)
     
     def handle_event(self, event, camera_offset):
         """Handle UI events"""
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.toggle_pause_menu()
+            return True
+        
+        if self.pause_menu_active and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for b in self.pause_buttons:
+                if b.handle_event(event):
+                    return True
+            return True
+        
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.build_toggle_button.handle_event(event)
             self.animal_overview_button.handle_event(event)

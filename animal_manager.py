@@ -1,5 +1,6 @@
 import pygame
 import random
+import json
 from animal import Animal
 from constants import *
 
