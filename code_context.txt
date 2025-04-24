@@ -1010,6 +1010,12 @@ class EconomyManager:
         
         self.game_state.add_notification(f"Monthly expenses: ${total_expenses:.2f}")
         self.game_state.add_notification(f"Current funds: ${self.game_state.funds:.2f}")
+
+        self.game_state.evaluate_monthly_win_conditions(
+            visitor_count = len(self.tourists),
+            herbivores    = self.count_species(["elephant", "zebra"]),
+            carnivores    = self.count_species(["lion"])
+        )
     
     def update_tourists(self, dt):
         """Update all tourists"""
@@ -1120,6 +1126,18 @@ import pygame
 from datetime import datetime
 from constants import *
 
+class GameSpeed:
+    PAUSED = 0
+    HOUR   = 1
+    DAY    = 6
+    WEEK   = 18
+
+    LABELS = {
+        PAUSED: "Paused",
+        HOUR:   "Hour",
+        DAY:    "Day",
+        WEEK:   "Week"
+    }
 class GameState:
     def __init__(self, difficulty="medium"):
         self.difficulty = difficulty
@@ -1173,10 +1191,15 @@ class GameState:
             self.add_notification(f"Day {self.day} has begun")
     
     def set_game_speed(self, speed):
-        """Set game speed: 0=paused, 1=normal, 3=fast"""
-        self.game_speed = speed if 0 <= speed <= 3 else 1
-        speed_labels = {0: "Paused", 1: "Normal", 3: "Fast"}
-        self.add_notification(f"Game speed: {speed_labels.get(speed, speed)}")
+        """Toggle pause/resume and track last non‐zero speed."""
+        if speed == GameSpeed.PAUSED and self.game_speed == GameSpeed.PAUSED:
+            speed = self.last_nonzero_speed
+        elif speed != GameSpeed.PAUSED:
+            self.last_nonzero_speed = speed
+
+        self.game_speed = speed
+        self.add_notification(f"Game speed: {GameSpeed.LABELS[speed]}")
+
     
     def add_funds(self, amount):
         """Add or subtract funds"""
@@ -1385,7 +1408,7 @@ import json
 from os import path
 from collections import defaultdict
 
-from game_state import GameState
+from game_state import GameState, GameSpeed
 from terrain import TerrainGenerator
 from building_manager import BuildingManager
 from animal_manager   import AnimalManager
@@ -1443,15 +1466,15 @@ def main(difficulty='medium'):
             camera_offset[0] += camera_speed * dt
 
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
-                    game_state.set_game_speed(0)
+                    game_state.set_game_speed(GameSpeed.PAUSED)
                 elif event.key == pygame.K_2:
-                    game_state.set_game_speed(1)
+                    game_state.set_game_speed(GameSpeed.HOUR)
                 elif event.key == pygame.K_3:
-                    game_state.set_game_speed(3)
+                    game_state.set_game_speed(GameSpeed.DAY)
+                elif event.key == pygame.K_4:
+                    game_state.set_game_speed(GameSpeed.WEEK)
                 elif event.key == pygame.K_b:
                     ui.toggle_build_menu()
                 elif event.key == pygame.K_TAB:
@@ -2086,45 +2109,51 @@ class Tourist(pygame.sprite.Sprite):
         self.manager.add_review(review_score)
 
 // File: ui.py
+
 import pygame
 from constants import *
 from components import Button
-from utils import distance
+from utils      import distance
+from game_state import GameSpeed
 
 class UIManager:
     def __init__(self, game_state, animal_manager, building_manager, economy_manager):
-        self.game_state = game_state
-        self.animal_manager = animal_manager
+        self.game_state       = game_state
+        self.animal_manager   = animal_manager
         self.building_manager = building_manager
-        self.economy_manager = economy_manager
-        
-        self.selected_building = None
-        self.close_button = None
-        self.build_menu_active = False
+        self.economy_manager  = economy_manager
+
+        self.selected_building      = None
+        self.build_menu_active      = False
         self.animal_overview_active = False
-        
+
         self.build_buttons = []
-        self.time_buttons = []
-        
+        self.time_buttons  = []
+
         self.small_font = pygame.font.SysFont('Arial', 14)
-        self.medium_font = pygame.font.SysFont('Arial', 18)
+        self.medium_font= pygame.font.SysFont('Arial', 18)
         self.large_font = pygame.font.SysFont('Arial', 24)
         self.title_font = pygame.font.SysFont('Arial', 32)
-        
-        self.notification_surface = pygame.Surface((int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)), pygame.SRCALPHA)
-        
+
+        self.notification_surface = pygame.Surface(
+            (int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)),
+            pygame.SRCALPHA
+        )
+
         self.create_menu_buttons()
-    
+
     def create_menu_buttons(self):
-        """Create the UI buttons"""
         button_y = SCREEN_HEIGHT - 40
+
         self.time_buttons = [
-            Button(SCREEN_WIDTH//2 - 90, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(0)),
-            Button(SCREEN_WIDTH//2 - 30, button_y, 60, 30, "Normal", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(1)),
-            Button(SCREEN_WIDTH//2 + 30, button_y, 60, 30, "Fast", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(3))
+            Button(SCREEN_WIDTH//2 - 150, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.PAUSED)),
+            Button(SCREEN_WIDTH//2 -  75, button_y, 60, 30, "Hour",  GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.HOUR)),
+            Button(SCREEN_WIDTH//2      , button_y, 60, 30, "Day",   GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.DAY)),
+            Button(SCREEN_WIDTH//2 +   75, button_y, 60, 30, "Week",  GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.WEEK)),
         ]
         
         menu_x = 10
