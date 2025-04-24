@@ -88,8 +88,20 @@ class VehicleManager:
         if self.game_state.funds < cost:
             self.game_state.add_notification("Not enough funds for jeep")
             return False
+
         self.game_state.add_funds(-cost)
+
         jeep = Jeep(self.terrain, self.econ)
+
+        route = self.terrain.find_path(
+            self.terrain.entrance_tile,
+            self.terrain.exit_tile
+        )
+        if route:
+            jeep.grid_path = route
+            jeep.path_idx  = 0
+            jeep.state     = "to_exit"
+
         self.vehicles.add(jeep)
         self.game_state.add_notification("Purchased a safari jeep!")
         return True
