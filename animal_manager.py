@@ -85,7 +85,19 @@ class AnimalManager:
                     return pos
                 elif terrain_type == "grass":
                     return pos
-        return self.find_spawn_position(species)
+
+        for _ in range(100):
+            x = random.uniform(-self.terrain.size * TILE_SIZE / 2, self.terrain.size * TILE_SIZE / 2)
+            y = random.uniform(-self.terrain.size * TILE_SIZE / 2, self.terrain.size * TILE_SIZE / 2)
+            pos = (x, y)
+            terrain_type = self.terrain.get_terrain_at_position(pos)
+            if species == "crocodile" and terrain_type == "water":
+                return pos
+            elif terrain_type == "grass":
+                return pos
+
+        return (0, 0)
+
 
     def update(self, dt):
         """Update all animals"""
@@ -157,7 +169,7 @@ class AnimalManager:
     def try_group_reproduction(self, dt):
         """Let animal groups reproduce if they meet conditions"""
         group_min_size = 3
-        reproduction_cooldown = 30  # seconds between reproductions per group
+        reproduction_cooldown = 30
 
         if not hasattr(self, "last_reproduction_time"):
             self.last_reproduction_time = {}
@@ -165,7 +177,7 @@ class AnimalManager:
         species_groups = {}
 
         for animal in self.animals:
-            if animal.age >= 0.8:  # consider adult
+            if animal.age >= 0.8:
                 key = (animal.species, animal.group_id)
                 species_groups.setdefault(key, []).append(animal)
 
