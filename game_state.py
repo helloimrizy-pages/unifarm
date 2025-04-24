@@ -48,6 +48,11 @@ class GameState:
         self.settings = {
             "easy": {
                 "starting_funds": 10000,
+                "min_funds": 10000,
+                "min_visitors": 30,
+                "min_herbivores": 10,
+                "min_carnivores": 5,
+                "months_required": 3,
                 "animal_need_rate": 0.7,
                 "tourist_rate": 1.3,
                 "building_costs": 0.8,
@@ -55,6 +60,11 @@ class GameState:
             },
             "medium": {
                 "starting_funds": 7000,
+                "min_funds": 15000,
+                "min_visitors": 50,
+                "min_herbivores": 15,
+                "min_carnivores": 8,
+                "months_required": 6,
                 "animal_need_rate": 1.0,
                 "tourist_rate": 1.0,
                 "building_costs": 1.0,
@@ -62,6 +72,11 @@ class GameState:
             },
             "hard": {
                 "starting_funds": 5000,
+                "min_funds": 20000,
+                "min_visitors": 80,
+                "min_herbivores": 20,
+                "min_carnivores": 12,
+                "months_required": 12,
                 "animal_need_rate": 1.3,
                 "tourist_rate": 0.7,
                 "building_costs": 1.2,
@@ -72,6 +87,7 @@ class GameState:
         self.difficulty_settings = self.settings[self.difficulty]
         self.funds = self.difficulty_settings["starting_funds"]
         self.profit_target = self.difficulty_settings["win_profit_target"]
+        self.consecutive_win_months = 0
     
     def update(self, dt):
         self.time_elapsed += dt
