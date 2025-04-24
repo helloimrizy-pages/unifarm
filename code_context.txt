@@ -1266,7 +1266,7 @@ class GameState:
 // File: main_menu.py
 import tkinter as tk
 from settings_page import SafariSettingsApp
-from new_adventure import NewAdventureWindow  # <- Import your class here
+from new_game import NewAdventureWindow  # <- Import your class here
 import pygame
 import os
 
@@ -1478,6 +1478,7 @@ if __name__ == '__main__':
 
 // File: new_game.py
 import tkinter as tk
+import subprocess
 from tkinter import messagebox
 
 class NewAdventureWindow:
@@ -1532,7 +1533,8 @@ class NewAdventureWindow:
             messagebox.showwarning("Input Required", "Please enter a valid park name.")
             return
         self.root.destroy()
-        print(f"Park name: {park_name}")  # 🔁 Replace with your game-start logic
+        subprocess.Popen(["python", "main.py"])
+
 
 // File: settings_page.py
 import tkinter as tk
@@ -1565,6 +1567,7 @@ class SafariSettingsApp:
         self.make_button(button_frame, "Apply Changes", self.apply_changes).grid(row=0, column=0, padx=5)
         self.make_button(button_frame, "Back", self.back).grid(row=0, column=1, padx=5)
         self.make_button(button_frame, "Exit Game", self.exit_game).grid(row=1, column=0, columnspan=2, pady=10)
+
 
     def add_slider(self, parent, label_text):
         frame = tk.Frame(parent, bg="#333333")
@@ -2487,8 +2490,20 @@ class VehicleManager:
         if self.game_state.funds < cost:
             self.game_state.add_notification("Not enough funds for jeep")
             return False
+
         self.game_state.add_funds(-cost)
+
         jeep = Jeep(self.terrain, self.econ)
+
+        route = self.terrain.find_path(
+            self.terrain.entrance_tile,
+            self.terrain.exit_tile
+        )
+        if route:
+            jeep.grid_path = route
+            jeep.path_idx  = 0
+            jeep.state     = "to_exit"
+
         self.vehicles.add(jeep)
         self.game_state.add_notification("Purchased a safari jeep!")
         return True

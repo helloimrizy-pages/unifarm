@@ -11,11 +11,12 @@ from collections import defaultdict
 from game_state import GameState
 from terrain import TerrainGenerator
 from building_manager import BuildingManager
-from animal_manager import AnimalManager
-from vehicle import VehicleManager
-from economy_manager import EconomyManager
-from ui import UIManager
-from constants import *
+from animal_manager   import AnimalManager
+from vehicle          import VehicleManager
+from economy_manager  import EconomyManager
+from ui               import UIManager
+from constants        import *
+from game_over_screen import game_over_screen
 
 UI_STATE_MAIN_MENU = "main_menu"
 UI_STATE_SETTINGS = "settings"
@@ -67,7 +68,6 @@ def main(difficulty='medium'):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
                     game_state.set_game_speed(0)
@@ -100,28 +100,20 @@ def main(difficulty='medium'):
             game_state.update(dt * ts)
 
         if game_state.check_win_condition():
-            pygame.draw.rect(screen, (0,100,0,200),
-                             (SCREEN_WIDTH//4, SCREEN_HEIGHT//4,
-                              SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            win_text = ui.title_font.render("You Win!", True, WHITE)
-            screen.blit(win_text,
-                        (SCREEN_WIDTH//2 - win_text.get_width()//2,
-                         SCREEN_HEIGHT//2 - win_text.get_height()//2))
-            pygame.display.flip()
-            pygame.time.wait(5000)
-            running = False
+            result = game_over_screen(screen, ui.title_font, "You Win!")
+            if result == 'restart':
+                main(difficulty)
+                return
+            else:
+                running = False
 
         if game_state.check_lose_condition():
-            pygame.draw.rect(screen, (100,0,0,200),
-                             (SCREEN_WIDTH//4, SCREEN_HEIGHT//4,
-                              SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            lose_text = ui.title_font.render("Game Over", True, WHITE)
-            screen.blit(lose_text,
-                        (SCREEN_WIDTH//2 - lose_text.get_width()//2,
-                         SCREEN_HEIGHT//2 - lose_text.get_height()//2))
-            pygame.display.flip()
-            pygame.time.wait(5000)
-            running = False
+            result = game_over_screen(screen, ui.title_font, "Game Over")
+            if result == 'restart':
+                main(difficulty)
+                return
+            else:
+                running = False
 
         screen.fill(BLACK)
         terrain.render(screen, camera_offset)
