@@ -8,7 +8,7 @@ import json
 from os import path
 from collections import defaultdict
 
-from game_state import GameState
+from game_state import GameState, GameSpeed
 from terrain import TerrainGenerator
 from building_manager import BuildingManager
 from animal_manager   import AnimalManager
@@ -66,15 +66,15 @@ def main(difficulty='medium'):
             camera_offset[0] += camera_speed * dt
 
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
-                    game_state.set_game_speed(0)
+                    game_state.set_game_speed(GameSpeed.PAUSED)
                 elif event.key == pygame.K_2:
-                    game_state.set_game_speed(1)
+                    game_state.set_game_speed(GameSpeed.HOUR)
                 elif event.key == pygame.K_3:
-                    game_state.set_game_speed(3)
+                    game_state.set_game_speed(GameSpeed.DAY)
+                elif event.key == pygame.K_4:
+                    game_state.set_game_speed(GameSpeed.WEEK)
                 elif event.key == pygame.K_b:
                     ui.toggle_build_menu()
                 elif event.key == pygame.K_TAB:

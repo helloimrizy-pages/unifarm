@@ -71,6 +71,12 @@ class EconomyManager:
         
         self.game_state.add_notification(f"Monthly expenses: ${total_expenses:.2f}")
         self.game_state.add_notification(f"Current funds: ${self.game_state.funds:.2f}")
+
+        self.game_state.evaluate_monthly_win_conditions(
+            visitor_count = len(self.tourists),
+            herbivores    = self.count_species(["elephant", "zebra"]),
+            carnivores    = self.count_species(["lion"])
+        )
     
     def update_tourists(self, dt):
         """Update all tourists"""

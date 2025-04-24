@@ -2,6 +2,18 @@ import pygame
 from datetime import datetime
 from constants import *
 
+class GameSpeed:
+    PAUSED = 0
+    HOUR   = 1
+    DAY    = 6
+    WEEK   = 18
+
+    LABELS = {
+        PAUSED: "Paused",
+        HOUR:   "Hour",
+        DAY:    "Day",
+        WEEK:   "Week"
+    }
 class GameState:
     def __init__(self, difficulty="medium"):
         self.difficulty = difficulty
@@ -55,10 +67,15 @@ class GameState:
             self.add_notification(f"Day {self.day} has begun")
     
     def set_game_speed(self, speed):
-        """Set game speed: 0=paused, 1=normal, 3=fast"""
-        self.game_speed = speed if 0 <= speed <= 3 else 1
-        speed_labels = {0: "Paused", 1: "Normal", 3: "Fast"}
-        self.add_notification(f"Game speed: {speed_labels.get(speed, speed)}")
+        """Toggle pause/resume and track last non‐zero speed."""
+        if speed == GameSpeed.PAUSED and self.game_speed == GameSpeed.PAUSED:
+            speed = self.last_nonzero_speed
+        elif speed != GameSpeed.PAUSED:
+            self.last_nonzero_speed = speed
+
+        self.game_speed = speed
+        self.add_notification(f"Game speed: {GameSpeed.LABELS[speed]}")
+
     
     def add_funds(self, amount):
         """Add or subtract funds"""

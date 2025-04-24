@@ -1,42 +1,48 @@
+
 import pygame
 from constants import *
 from components import Button
-from utils import distance
+from utils      import distance
+from game_state import GameSpeed
 
 class UIManager:
     def __init__(self, game_state, animal_manager, building_manager, economy_manager):
-        self.game_state = game_state
-        self.animal_manager = animal_manager
+        self.game_state       = game_state
+        self.animal_manager   = animal_manager
         self.building_manager = building_manager
-        self.economy_manager = economy_manager
-        
-        self.selected_building = None
-        self.close_button = None
-        self.build_menu_active = False
+        self.economy_manager  = economy_manager
+
+        self.selected_building      = None
+        self.build_menu_active      = False
         self.animal_overview_active = False
-        
+
         self.build_buttons = []
-        self.time_buttons = []
-        
+        self.time_buttons  = []
+
         self.small_font = pygame.font.SysFont('Arial', 14)
-        self.medium_font = pygame.font.SysFont('Arial', 18)
+        self.medium_font= pygame.font.SysFont('Arial', 18)
         self.large_font = pygame.font.SysFont('Arial', 24)
         self.title_font = pygame.font.SysFont('Arial', 32)
-        
-        self.notification_surface = pygame.Surface((int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)), pygame.SRCALPHA)
-        
+
+        self.notification_surface = pygame.Surface(
+            (int(SCREEN_WIDTH * 0.3), int(SCREEN_HEIGHT * 0.15)),
+            pygame.SRCALPHA
+        )
+
         self.create_menu_buttons()
-    
+
     def create_menu_buttons(self):
-        """Create the UI buttons"""
         button_y = SCREEN_HEIGHT - 40
+
         self.time_buttons = [
-            Button(SCREEN_WIDTH//2 - 90, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(0)),
-            Button(SCREEN_WIDTH//2 - 30, button_y, 60, 30, "Normal", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(1)),
-            Button(SCREEN_WIDTH//2 + 30, button_y, 60, 30, "Fast", GRAY, LIGHT_GRAY, 
-                  action=lambda: self.game_state.set_game_speed(3))
+            Button(SCREEN_WIDTH//2 - 150, button_y, 60, 30, "Pause", GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.PAUSED)),
+            Button(SCREEN_WIDTH//2 -  75, button_y, 60, 30, "Hour",  GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.HOUR)),
+            Button(SCREEN_WIDTH//2      , button_y, 60, 30, "Day",   GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.DAY)),
+            Button(SCREEN_WIDTH//2 +   75, button_y, 60, 30, "Week",  GRAY, LIGHT_GRAY,
+                   action=lambda: self.game_state.set_game_speed(GameSpeed.WEEK)),
         ]
         
         menu_x = 10
