@@ -31,7 +31,8 @@ class Animal(pygame.sprite.Sprite):
         self.game_state = animal_manager.game_state
         self.age = random.uniform(0.2, 1.0)
         self.group_id = random.randint(1000, 9999)
-        self.speed = config['speed'] * self.age * (TILE_SIZE / 32)
+        self.speed = max(30, config['speed'] * self.age * (TILE_SIZE / 32))
+
         
         self.hunger = random.randint(50, 80)
         self.thirst = random.randint(50, 80)
@@ -144,8 +145,8 @@ class Animal(pygame.sprite.Sprite):
         """Seek out water sources"""
         if not self.is_water_station(self.target):
             water_stations = [b for b in self.manager.buildings.buildings 
-                             if b.building_type == "water_station"]
-            
+                            if b.building_type == "water_station"]
+
             if water_stations:
                 closest = min(water_stations, key=lambda b: distance(self.position, b.position))
                 self.target = closest
@@ -154,19 +155,22 @@ class Animal(pygame.sprite.Sprite):
                 water_locations = self.find_water_locations()
                 if water_locations:
                     self.target_position = random.choice(water_locations)
-                    self.target = {'position': self.target_position, 'building_type': 'water_natural'}
+                    self.target = {'position': self.target_position, 'building_type': 'natural_water'}
                 else:
                     self.state = "idle"
                     return
-        
+
         if self.target_position:
-            self.move_to_target(dt)
+            blocked = not self.move_to_target(dt)
             
-            if distance(self.position, self.target_position) < TILE_SIZE * 2:
+            if not blocked and distance(self.position, self.target_position) < TILE_SIZE * 2:
                 self.thirst = max(0, self.thirst - 40)
                 self.state = "idle"
                 self.target = None
                 self.target_position = None
+            elif blocked:
+                self.target_position = None
+                self.target = None
     
     def rest(self, dt):
         """Rest to regain energy"""
@@ -201,39 +205,39 @@ class Animal(pygame.sprite.Sprite):
                 self.wandering = False
                 self.wander_timer = random.uniform(2, 5)
 
-    
     def move_to_target(self, dt):
         """Move toward target position"""
         if not self.target_position:
-            return
-        
+            return False
+
         direction_x = self.target_position[0] - self.position[0]
         direction_y = self.target_position[1] - self.position[1]
         
-        dir_length = math.sqrt(direction_x**2 + direction_y**2)
-        if dir_length > 0:
-            direction_x = direction_x / dir_length
-            direction_y = direction_y / dir_length
+        dir_length = math.hypot(direction_x, direction_y)
+        if dir_length == 0:
+            return False
+
+        direction_x /= dir_length
+        direction_y /= dir_length
         
         speed = self.speed * dt
-        
         move_x = direction_x * speed
         move_y = direction_y * speed
-        
         new_pos = (self.position[0] + move_x, self.position[1] + move_y)
-        
+
         if (self.terrain.is_water_at_position(new_pos) and 
             self.species != "crocodile" and 
             self.state != "seeking_water"):
-            pass
-        else:
-            self.position = new_pos
-        
-        if dir_length > 0:
-            self.rotation = math.degrees(math.atan2(direction_y, direction_x))
-            
-            self.image = pygame.transform.rotate(self.base_image, -self.rotation + 90)
-    
+            return False
+
+
+        self.position = new_pos
+        self.rect.center = self.position
+        self.rotation = math.degrees(math.atan2(direction_y, direction_x))
+        self.image = pygame.transform.rotate(self.base_image, -self.rotation + 90)
+
+        return True
+
     def find_grass_locations(self):
         """Find suitable grass locations for food"""
         grass_locations = []
