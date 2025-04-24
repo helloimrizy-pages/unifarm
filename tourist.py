@@ -94,43 +94,63 @@ class Tourist(pygame.sprite.Sprite):
     
     def move(self, dt):
         """Move around the park"""
+
         if self.waiting_time > 0:
             self.waiting_time -= dt
             return
-        
+
+        if self.path and self.path_index < len(self.path):
+            self.target_position = self.path[self.path_index]
+            if distance(self.position, self.target_position) < TILE_SIZE / 2:
+                self.path_index += 1
+                if self.path_index >= len(self.path):
+                    self.path = []
+                    self.target_position = None
+                    self.waiting_time = random.uniform(5, 20)
+                    return
+
         if not self.target_position or distance(self.position, self.target_position) < TILE_SIZE:
             self.choose_new_target()
             self.waiting_time = random.uniform(5, 20)
             return
-        
+
         direction_x = self.target_position[0] - self.position[0]
         direction_y = self.target_position[1] - self.position[1]
-        
         dir_length = math.sqrt(direction_x**2 + direction_y**2)
         if dir_length > 0:
-            direction_x = direction_x / dir_length
-            direction_y = direction_y / dir_length
-        
+            direction_x /= dir_length
+            direction_y /= dir_length
+
         speed = self.speed * dt
-        
         move_x = direction_x * speed
         move_y = direction_y * speed
-        
         new_pos = (self.position[0] + move_x, self.position[1] + move_y)
-        
+
         if not self.terrain.is_water_at_position(new_pos):
             self.position = new_pos
             self.rect.center = self.position
+
     
     def choose_new_target(self):
         """Choose a new target to move towards"""
+
+        if not self.path:
+            start_tile = self.terrain.world_to_grid(self.position)
+            path = self.terrain.find_path(start_tile, self.terrain.exit_tile)
+            if path:
+                self.path = [self.terrain.grid_to_world(p) for p in path]
+                self.path_index = 0
+                self.target_position = self.path[self.path_index]
+                return
+            else:
+                self.path = []
+
         paths = [b for b in self.manager.buildings.buildings 
-               if b.building_type == "path"]
+                if b.building_type == "path"]
         platforms = [b for b in self.manager.buildings.buildings 
                     if b.building_type == "viewing_platform"]
-        
         animals = self.manager.animals.animals
-        
+
         if random.random() < 0.7 and paths:
             target = random.choice(paths)
             self.target_position = target.position
@@ -142,14 +162,13 @@ class Tourist(pygame.sprite.Sprite):
             self.target_position = target.position
         else:
             terrain_size = self.terrain.size * TILE_SIZE
-            x = random.uniform(-terrain_size/2, terrain_size/2)
-            y = random.uniform(-terrain_size/2, terrain_size/2)
-            
+            x = random.uniform(-terrain_size / 2, terrain_size / 2)
+            y = random.uniform(-terrain_size / 2, terrain_size / 2)
             while self.terrain.is_water_at_position((x, y)):
-                x = random.uniform(-terrain_size/2, terrain_size/2)
-                y = random.uniform(-terrain_size/2, terrain_size/2)
-            
+                x = random.uniform(-terrain_size / 2, terrain_size / 2)
+                y = random.uniform(-terrain_size / 2, terrain_size / 2)
             self.target_position = (x, y)
+
     
     def spend_money(self):
         """Tourist spends money based on their satisfaction"""

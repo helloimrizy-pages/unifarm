@@ -290,9 +290,12 @@ class UIManager:
         
         for building in self.building_manager.buildings:
             if distance(building.position, world_pos) < TILE_SIZE:
-                info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                if hasattr(building, "health"):
+                    info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                else:
+                    info_text += f" | {building.building_type.capitalize()}"
                 break
-        
+
         for animal in self.animal_manager.animals:
             if distance(animal.position, world_pos) < TILE_SIZE:
                 info_text += f" | {animal.species.capitalize()} (H:{animal.health:.0f}% F:{animal.hunger:.0f}% W:{animal.thirst:.0f}%)"

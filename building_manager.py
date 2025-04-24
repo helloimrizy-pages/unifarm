@@ -1,14 +1,16 @@
 import pygame
 from building import Building
+
 from constants import *
 from utils import distance
-
+from types import SimpleNamespace
 class BuildingManager:
     def __init__(self, game_state, terrain):
         self.game_state = game_state
         self.terrain = terrain
         self.buildings = []
         self.buildings_group = pygame.sprite.Group()
+        self.pending_building_type = None
         
         self.building_config = {
             "feeding_station": {
@@ -71,39 +73,69 @@ class BuildingManager:
             },
         }
     
-    def place_building(self, building_type, position):
-        """Place a new building at the specified position"""
+    def place_building(self, building_type, world_pos):
+        self.pending_building_type = building_type
+
+        # check occupancy
+        if self.is_position_occupied(world_pos):
+            self.game_state.add_notification("Can't build there!")
+            return False
+
+        # pay cost
         cost = self.building_config[building_type]["cost"]
-        if self.game_state.funds < cost:
-            self.game_state.add_notification(f"Not enough funds to build {building_type}")
-            return None
-        
-        if not self.terrain.is_suitable_for_building(position):
-            self.game_state.add_notification(f"Cannot build {building_type} on this terrain")
-            return None
-        
-        if self.is_position_occupied(position):
-            self.game_state.add_notification(f"Cannot build {building_type} here: space occupied")
-            return None
-        
-        building = Building(building_type, position, self)
-        self.buildings_group.add(building)
-        return building
-    
-    def is_position_occupied(self, position):
-        """Check if the position is already occupied by another building"""
-        for building in self.buildings:
-            if distance(building.position, position) < TILE_SIZE * 2:
-                return True
-        return False
+        self.game_state.add_funds(-cost)
+
+        if building_type == "path":
+            # convert terrain cell under mouse into a road tile
+            gx, gy = self.terrain.world_to_grid(world_pos)
+            self.terrain.terrain_grid[gy][gx]["type"] = "path"
+            # redraw only that cell
+            tx = gx * TILE_SIZE
+            ty = gy * TILE_SIZE
+            pygame.draw.rect(self.terrain.terrain_surface,
+                            self.building_config["path"]["color"],
+                            (tx, ty, TILE_SIZE, TILE_SIZE))
+            self.buildings.append(SimpleNamespace(
+                building_type="path",
+                position=self.terrain.grid_to_world((gx,gy)),
+                rect=pygame.Rect(tx, ty, TILE_SIZE, TILE_SIZE)
+            ) )
+            self.game_state.add_notification(f"Built road for ${cost}")
+            return True
+
+        # otherwise a “real” building
+        b = Building(building_type, world_pos, self)
+        self.buildings.append(b)
+        self.game_state.add_notification(f"Built {building_type} for ${cost}")
+        return True
+
+
+    def snap_to_grid(self, position):
+        grid_x, grid_y = self.world_to_grid(position)
+        return self.grid_to_world((grid_x, grid_y))
+
+    def is_position_occupied(self, world_pos):
+            """
+            True only if new building’s rect would *overlap* an existing one.
+            Adjacent (=touching) is OK.
+            """
+            cfg = self.building_config.get(self.pending_building_type, {})
+            w = int(cfg.get("scale",(1,1))[0] * TILE_SIZE)
+            h = int(cfg.get("scale",(1,1))[1] * TILE_SIZE)
+            new_rect = pygame.Rect(0,0,w,h)
+            new_rect.center = world_pos
+
+            for b in self.buildings:
+                if new_rect.colliderect(b.rect):
+                    return True
+            return False
     
     def update(self, dt):
-        """Update all buildings"""
-        for building in list(self.buildings):
-            building.step(dt)
-            
-            if building.health <= 0:
-                self.remove_building(building)
+        """Update all non-road buildings each frame."""
+        for b in list(self.buildings):
+            # only real Building instances have step(); skip 'path' entries
+            if getattr(b, "building_type", None) != "path":
+                b.step(dt)
     
     def remove_building(self, building):
         """Remove a building from the game"""
@@ -115,8 +147,11 @@ class BuildingManager:
     def render(self, screen, camera_offset):
         """Render all buildings with camera offset"""
         for building in self.buildings:
+            if not hasattr(building, "image"):
+                continue  # Skip rendering if no image (e.g., for paths)
+
             screen_pos = (building.position[0] - camera_offset[0], 
-                         building.position[1] - camera_offset[1])
+                        building.position[1] - camera_offset[1])
             
             if (screen_pos[0] < -100 or screen_pos[0] > SCREEN_WIDTH + 100 or
                 screen_pos[1] < -100 or screen_pos[1] > SCREEN_HEIGHT + 100):
@@ -141,15 +176,21 @@ class BuildingManager:
         """Calculate a score for tourist infrastructure"""
         if not self.buildings:
             return 0
-        
-        path_count = len([b for b in self.buildings if b.building_type == "path"])
-        platform_count = len([b for b in self.buildings if b.building_type == "viewing_platform"])
-        
+
+        path_count = len([b for b in self.buildings if getattr(b, "building_type", None) == "path"])
+        platform_count = len([b for b in self.buildings if getattr(b, "building_type", None) == "viewing_platform"])
+
         base_score = min(80, path_count * 5 + platform_count * 15)
-        
-        avg_health = sum(b.health for b in self.buildings) / len(self.buildings)
+
+        # Only consider buildings with health (i.e., real Building instances)
+        buildings_with_health = [b for b in self.buildings if hasattr(b, "health")]
+
+        if not buildings_with_health:
+            return base_score  # Avoid division by zero
+
+        avg_health = sum(b.health for b in buildings_with_health) / len(buildings_with_health)
         health_factor = avg_health / 100
-        
+
         return base_score * health_factor
     
     def save_buildings(self, filename="buildings.json"):

@@ -86,7 +86,19 @@ class AnimalManager:
                     return pos
                 elif terrain_type == "grass":
                     return pos
-        return self.find_spawn_position(species)
+
+        for _ in range(100):
+            x = random.uniform(-self.terrain.size * TILE_SIZE / 2, self.terrain.size * TILE_SIZE / 2)
+            y = random.uniform(-self.terrain.size * TILE_SIZE / 2, self.terrain.size * TILE_SIZE / 2)
+            pos = (x, y)
+            terrain_type = self.terrain.get_terrain_at_position(pos)
+            if species == "crocodile" and terrain_type == "water":
+                return pos
+            elif terrain_type == "grass":
+                return pos
+
+        return (0, 0)
+
 
     def update(self, dt):
         """Update all animals"""
@@ -158,7 +170,7 @@ class AnimalManager:
     def try_group_reproduction(self, dt):
         """Let animal groups reproduce if they meet conditions"""
         group_min_size = 3
-        reproduction_cooldown = 30  # seconds between reproductions per group
+        reproduction_cooldown = 30
 
         if not hasattr(self, "last_reproduction_time"):
             self.last_reproduction_time = {}
@@ -166,7 +178,7 @@ class AnimalManager:
         species_groups = {}
 
         for animal in self.animals:
-            if animal.age >= 0.8:  # consider adult
+            if animal.age >= 0.8:
                 key = (animal.species, animal.group_id)
                 species_groups.setdefault(key, []).append(animal)
 
@@ -325,7 +337,8 @@ class Animal(pygame.sprite.Sprite):
         self.game_state = animal_manager.game_state
         self.age = random.uniform(0.2, 1.0)
         self.group_id = random.randint(1000, 9999)
-        self.speed = config['speed'] * self.age * (TILE_SIZE / 32)
+        self.speed = max(30, config['speed'] * self.age * (TILE_SIZE / 32))
+
         
         self.hunger = random.randint(50, 80)
         self.thirst = random.randint(50, 80)
@@ -438,8 +451,8 @@ class Animal(pygame.sprite.Sprite):
         """Seek out water sources"""
         if not self.is_water_station(self.target):
             water_stations = [b for b in self.manager.buildings.buildings 
-                             if b.building_type == "water_station"]
-            
+                            if b.building_type == "water_station"]
+
             if water_stations:
                 closest = min(water_stations, key=lambda b: distance(self.position, b.position))
                 self.target = closest
@@ -448,19 +461,22 @@ class Animal(pygame.sprite.Sprite):
                 water_locations = self.find_water_locations()
                 if water_locations:
                     self.target_position = random.choice(water_locations)
-                    self.target = {'position': self.target_position, 'building_type': 'water_natural'}
+                    self.target = {'position': self.target_position, 'building_type': 'natural_water'}
                 else:
                     self.state = "idle"
                     return
-        
+
         if self.target_position:
-            self.move_to_target(dt)
+            blocked = not self.move_to_target(dt)
             
-            if distance(self.position, self.target_position) < TILE_SIZE * 2:
+            if not blocked and distance(self.position, self.target_position) < TILE_SIZE * 2:
                 self.thirst = max(0, self.thirst - 40)
                 self.state = "idle"
                 self.target = None
                 self.target_position = None
+            elif blocked:
+                self.target_position = None
+                self.target = None
     
     def rest(self, dt):
         """Rest to regain energy"""
@@ -495,39 +511,39 @@ class Animal(pygame.sprite.Sprite):
                 self.wandering = False
                 self.wander_timer = random.uniform(2, 5)
 
-    
     def move_to_target(self, dt):
         """Move toward target position"""
         if not self.target_position:
-            return
-        
+            return False
+
         direction_x = self.target_position[0] - self.position[0]
         direction_y = self.target_position[1] - self.position[1]
         
-        dir_length = math.sqrt(direction_x**2 + direction_y**2)
-        if dir_length > 0:
-            direction_x = direction_x / dir_length
-            direction_y = direction_y / dir_length
+        dir_length = math.hypot(direction_x, direction_y)
+        if dir_length == 0:
+            return False
+
+        direction_x /= dir_length
+        direction_y /= dir_length
         
         speed = self.speed * dt
-        
         move_x = direction_x * speed
         move_y = direction_y * speed
-        
         new_pos = (self.position[0] + move_x, self.position[1] + move_y)
-        
+
         if (self.terrain.is_water_at_position(new_pos) and 
             self.species != "crocodile" and 
             self.state != "seeking_water"):
-            pass
-        else:
-            self.position = new_pos
-        
-        if dir_length > 0:
-            self.rotation = math.degrees(math.atan2(direction_y, direction_x))
-            
-            self.image = pygame.transform.rotate(self.base_image, -self.rotation + 90)
-    
+            return False
+
+
+        self.position = new_pos
+        self.rect.center = self.position
+        self.rotation = math.degrees(math.atan2(direction_y, direction_x))
+        self.image = pygame.transform.rotate(self.base_image, -self.rotation + 90)
+
+        return True
+
     def find_grass_locations(self):
         """Find suitable grass locations for food"""
         grass_locations = []
@@ -636,6 +652,239 @@ class Building(pygame.sprite.Sprite):
             return True
         else:
             self.game_state.add_notification(f"Not enough funds to repair {self.building_type}")
+            return False
+
+// File: building_manager.py
+import pygame
+from building import Building
+
+from constants import *
+from utils import distance
+from types import SimpleNamespace
+class BuildingManager:
+    def __init__(self, game_state, terrain):
+        self.game_state = game_state
+        self.terrain = terrain
+        self.buildings = []
+        self.buildings_group = pygame.sprite.Group()
+        self.pending_building_type = None
+        
+        self.building_config = {
+            "feeding_station": {
+                "scale": (2, 2),
+                "cost": 500,
+                "maintenance_cost": 50,
+                "color": ORANGE,
+                "effectiveness": 1.0
+            },
+            "water_station": {
+                "scale": (2, 2),
+                "cost": 400,
+                "maintenance_cost": 40,
+                "color": BLUE,
+                "effectiveness": 1.0
+            },
+            "path": {
+                "scale": (1, 1),
+                "cost": 100,
+                "maintenance_cost": 10,
+                "color": BROWN,
+                "effectiveness": 1.0
+            },
+            "viewing_platform": {
+                "scale": (3, 3),
+                "cost": 700,
+                "maintenance_cost": 50,
+                "color": LIGHT_GRAY,
+                "effectiveness": 1.0
+            },
+            "tree": {
+                "scale": (1, 2),
+                "cost": 50,
+                "maintenance_cost": 5,
+                "color": DARK_GRAY,
+            },
+            "bush": {
+                "scale": (1, 0.5),
+                "cost": 30,
+                "maintenance_cost": 3,
+                "color": GREEN,
+            },
+            "flower": {
+                "scale": (0.5, 0.5),
+                "cost": 20,
+                "maintenance_cost": 2,
+                "color": (128, 0, 255),
+            },
+            "pond": {
+                "scale": (2, 2),
+                "cost": 100,
+                "maintenance_cost": 10,
+                "color": LIGHT_BLUE,
+            },
+            "road": {
+                "scale": (1, 1),
+                "cost": 100,
+                "maintenance_cost": 5,
+                "color": BROWN,
+            },
+        }
+    
+    def place_building(self, building_type, world_pos):
+        self.pending_building_type = building_type
+
+        # check occupancy
+        if self.is_position_occupied(world_pos):
+            self.game_state.add_notification("Can't build there!")
+            return False
+
+        # pay cost
+        cost = self.building_config[building_type]["cost"]
+        self.game_state.add_funds(-cost)
+
+        if building_type == "path":
+            # convert terrain cell under mouse into a road tile
+            gx, gy = self.terrain.world_to_grid(world_pos)
+            self.terrain.terrain_grid[gy][gx]["type"] = "path"
+            # redraw only that cell
+            tx = gx * TILE_SIZE
+            ty = gy * TILE_SIZE
+            pygame.draw.rect(self.terrain.terrain_surface,
+                            self.building_config["path"]["color"],
+                            (tx, ty, TILE_SIZE, TILE_SIZE))
+            self.buildings.append(SimpleNamespace(
+                building_type="path",
+                position=self.terrain.grid_to_world((gx,gy)),
+                rect=pygame.Rect(tx, ty, TILE_SIZE, TILE_SIZE)
+            ) )
+            self.game_state.add_notification(f"Built road for ${cost}")
+            return True
+
+        # otherwise a “real” building
+        b = Building(building_type, world_pos, self)
+        self.buildings.append(b)
+        self.game_state.add_notification(f"Built {building_type} for ${cost}")
+        return True
+
+
+    def snap_to_grid(self, position):
+        grid_x, grid_y = self.world_to_grid(position)
+        return self.grid_to_world((grid_x, grid_y))
+
+    def is_position_occupied(self, world_pos):
+            """
+            True only if new building’s rect would *overlap* an existing one.
+            Adjacent (=touching) is OK.
+            """
+            cfg = self.building_config.get(self.pending_building_type, {})
+            w = int(cfg.get("scale",(1,1))[0] * TILE_SIZE)
+            h = int(cfg.get("scale",(1,1))[1] * TILE_SIZE)
+            new_rect = pygame.Rect(0,0,w,h)
+            new_rect.center = world_pos
+
+            for b in self.buildings:
+                if new_rect.colliderect(b.rect):
+                    return True
+            return False
+    
+    def update(self, dt):
+        """Update all non-road buildings each frame."""
+        for b in list(self.buildings):
+            # only real Building instances have step(); skip 'path' entries
+            if getattr(b, "building_type", None) != "path":
+                b.step(dt)
+    
+    def remove_building(self, building):
+        """Remove a building from the game"""
+        if building in self.buildings:
+            self.buildings.remove(building)
+            self.buildings_group.remove(building)
+            self.game_state.add_notification(f"{building.building_type} has broken down completely")
+    
+    def render(self, screen, camera_offset):
+        """Render all buildings with camera offset"""
+        for building in self.buildings:
+            if not hasattr(building, "image"):
+                continue  # Skip rendering if no image (e.g., for paths)
+
+            screen_pos = (building.position[0] - camera_offset[0], 
+                        building.position[1] - camera_offset[1])
+            
+            if (screen_pos[0] < -100 or screen_pos[0] > SCREEN_WIDTH + 100 or
+                screen_pos[1] < -100 or screen_pos[1] > SCREEN_HEIGHT + 100):
+                continue
+            
+            rect = building.image.get_rect()
+            rect.center = screen_pos
+            
+            screen.blit(building.image, rect)
+    
+    def get_monthly_maintenance_cost(self):
+        """Calculate the total monthly maintenance cost for all buildings"""
+        total_cost = 0
+        for building in self.buildings:
+            cost = self.building_config[building.building_type]["maintenance_cost"]
+            health_factor = 1 + (1 - building.health / 100) 
+            total_cost += cost * health_factor
+        
+        return total_cost
+    
+    def calculate_tourist_infrastructure_score(self):
+        """Calculate a score for tourist infrastructure"""
+        if not self.buildings:
+            return 0
+
+        path_count = len([b for b in self.buildings if getattr(b, "building_type", None) == "path"])
+        platform_count = len([b for b in self.buildings if getattr(b, "building_type", None) == "viewing_platform"])
+
+        base_score = min(80, path_count * 5 + platform_count * 15)
+
+        # Only consider buildings with health (i.e., real Building instances)
+        buildings_with_health = [b for b in self.buildings if hasattr(b, "health")]
+
+        if not buildings_with_health:
+            return base_score  # Avoid division by zero
+
+        avg_health = sum(b.health for b in buildings_with_health) / len(buildings_with_health)
+        health_factor = avg_health / 100
+
+        return base_score * health_factor
+    
+    def save_buildings(self, filename="buildings.json"):
+        """Save building data to a file"""
+        building_data = []
+        
+        for building in self.buildings:
+            data = {
+                "building_type": building.building_type,
+                "position": [building.position[0], building.position[1]],
+                "health": building.health
+            }
+            building_data.append(data)
+        
+        with open(filename, 'w') as f:
+            json.dump(building_data, f)
+        
+        return True
+    
+    def load_buildings(self, filename="buildings.json"):
+        """Load building data from a file"""
+        try:
+            with open(filename, 'r') as f:
+                building_data = json.load(f)
+            
+            for building in list(self.buildings):
+                self.remove_building(building)
+            
+            for data in building_data:
+                position = (data["position"][0], data["position"][1])
+                building = Building(data["building_type"], position, self)
+                building.health = data["health"]
+                self.buildings_group.add(building)
+            
+            return True
+        except Exception as e:
+            print(f"Error loading buildings: {str(e)}")
             return False
 
 // File: components.py
@@ -837,6 +1086,35 @@ class EconomyManager:
             rect.center = screen_pos
             
             screen.blit(tourist.image, rect)
+// File: constants.py
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+FPS = 60
+TILE_SIZE = 32
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+DARK_GREEN = (0, 100, 0)
+BLUE = (0, 0, 255)
+LIGHT_BLUE = (0, 100, 255, 150)
+YELLOW = (255, 255, 0)
+GRAY = (128, 128, 128)
+DARK_GRAY = (64, 64, 64)
+LIGHT_GRAY = (192, 192, 192)
+ORANGE = (255, 165, 0)
+BROWN = (165, 42, 42)
+PINK = (255, 105, 180)
+OLIVE = (128, 128, 0)
+LIGHT_RED = (255, 100, 100)
+LIGHT_GREEN = (144, 238, 144)
+
+STATE_MENU = 0
+STATE_PLAYING = 1
+STATE_PAUSED = 2
+STATE_GAME_OVER = 3
+STATE_WIN = 4
+STATE_ANIMAL_OVERVIEW = 5
 // File: game_state.py
 import pygame
 from datetime import datetime
@@ -985,6 +1263,69 @@ class GameState:
             self.add_notification(f"Error loading game: {str(e)}")
             return False
 
+// File: main_menu.py
+import tkinter as tk
+from settings_page import SafariSettingsApp
+from new_adventure import NewAdventureWindow  # <- Import your class here
+import pygame
+import os
+
+# Asset path
+ASSET_DIR = "assets"
+
+# Init mixer
+pygame.mixer.init()
+
+# Load sounds
+bg_music = os.path.join(ASSET_DIR, "song.wav")
+roar_sound = os.path.join(ASSET_DIR, "lion-roaring.mp3")
+
+# Load and play background music
+pygame.mixer.music.load(bg_music)
+pygame.mixer.music.set_volume(0.5)  # Default volume
+pygame.mixer.music.play(-1)
+
+# Play roar sound once
+roar = pygame.mixer.Sound(roar_sound)
+roar.set_volume(0.5)
+roar.play()
+
+def open_settings():
+    main_root.withdraw()
+    settings_window = tk.Toplevel()
+    SafariSettingsApp(settings_window, main_root, pygame.mixer.music, roar)
+
+def open_new_game():
+    main_root.withdraw()
+    new_game_window = tk.Toplevel()
+    NewAdventureWindow(new_game_window, main_root)
+    new_game_window.protocol("WM_DELETE_WINDOW", lambda: (new_game_window.destroy(), main_root.deiconify()))
+
+def exit_game():
+    main_root.quit()
+
+main_root = tk.Tk()
+main_root.geometry("1024x600")
+main_root.configure(bg="#88c999")
+
+bg_image = tk.PhotoImage(file=os.path.join(ASSET_DIR, "main_menu_image.png"))  # Ensure PNG format
+bg_label = tk.Label(main_root, image=bg_image)
+bg_label.place(relwidth=1, relheight=1)
+
+button_frame = tk.Frame(main_root, pady=20)
+button_frame.place(relx=0.5, rely=0.7, anchor="center")
+
+def make_button(text, cmd):
+    return tk.Button(button_frame, text=text, width=18, height=2, font=("Helvetica", 10, "bold"),
+                     bg="#c58b39", activebackground="#a4692f", command=cmd)
+
+make_button("NEW GAME", open_new_game).grid(row=0, column=0, padx=10)
+make_button("LOAD GAME", lambda: print("Load game")).grid(row=0, column=1, padx=10)
+make_button("SETTINGS", open_settings).grid(row=0, column=2, padx=10)
+make_button("EXIT", exit_game).grid(row=0, column=3, padx=10)
+
+main_root.protocol("WM_DELETE_WINDOW", main_root.quit)
+main_root.mainloop()
 // File: main.py
 import sys
 import pygame
@@ -1005,7 +1346,12 @@ from economy_manager import EconomyManager
 from ui import UIManager
 from constants import *
 
+UI_STATE_MAIN_MENU = "main_menu"
+UI_STATE_SETTINGS = "settings"
+UI_STATE_GAMEPLAY = "gameplay"
+
 pygame.init()
+ui_state = UI_STATE_MAIN_MENU
 pygame.font.init()
 
 def main(difficulty='medium'):
@@ -1013,31 +1359,31 @@ def main(difficulty='medium'):
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Safari Park - Pygame Edition")
     clock = pygame.time.Clock()
-    
+
     game_state = GameState(difficulty)
-    terrain = TerrainGenerator(game_state)
-    buildings = BuildingManager(game_state, terrain)
-    animals = AnimalManager(game_state, terrain)
-    vehicles = VehicleManager(game_state, buildings, terrain)
-    economy = EconomyManager(game_state, animals, buildings)
-    ui = UIManager(game_state, animals, buildings, economy)
-    
+    terrain    = TerrainGenerator(game_state)
+    buildings  = BuildingManager(game_state, terrain)
+    animals    = AnimalManager(game_state, terrain)
+    economy    = EconomyManager(game_state, animals, buildings)
+    vehicles   = VehicleManager(game_state, buildings, terrain, economy)
+    ui         = UIManager(game_state, animals, buildings, economy)
+
     animals.set_building_manager(buildings)
     animals.update_animal_stats()
     economy.vehicle_manager = vehicles
-    
+    ui.create_menu_buttons()
+
     camera_offset = [0, 0]
-    camera_speed = 500
-    
+    camera_speed  = 500
+
     running = True
     game_state.set_game_speed(1)
-    
+
     while running:
         dt = clock.tick(FPS) / 1000.0
-        
         mouse_pos = pygame.mouse.get_pos()
-        keys = pygame.key.get_pressed()
-        
+        keys      = pygame.key.get_pressed()
+
         if keys[pygame.K_w]:
             camera_offset[1] -= camera_speed * dt
         if keys[pygame.K_s]:
@@ -1046,11 +1392,11 @@ def main(difficulty='medium'):
             camera_offset[0] -= camera_speed * dt
         if keys[pygame.K_d]:
             camera_offset[0] += camera_speed * dt
-        
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
                     game_state.set_game_speed(0)
@@ -1058,13 +1404,10 @@ def main(difficulty='medium'):
                     game_state.set_game_speed(1)
                 elif event.key == pygame.K_3:
                     game_state.set_game_speed(3)
-                
                 elif event.key == pygame.K_b:
                     ui.toggle_build_menu()
-                
                 elif event.key == pygame.K_TAB:
                     ui.toggle_animal_overview()
-                
                 elif event.key == pygame.K_f and ui.build_menu_active:
                     ui.select_building('feeding_station')
                 elif event.key == pygame.K_w and ui.build_menu_active:
@@ -1073,10 +1416,10 @@ def main(difficulty='medium'):
                     ui.select_building('path')
                 elif event.key == pygame.K_v and ui.build_menu_active:
                     ui.select_building('viewing_platform')
-            
+
             if ui.handle_event(event, camera_offset):
                 continue
-        
+
         if game_state.game_speed > 0:
             ts = game_state.game_speed
             animals.update(dt * ts)
@@ -1084,41 +1427,40 @@ def main(difficulty='medium'):
             economy.update(dt * ts)
             vehicles.update(dt * ts)
             game_state.update(dt * ts)
-        
+
         if game_state.check_win_condition():
-            print("You win!")
-            pygame.draw.rect(screen, (0, 100, 0, 200), (SCREEN_WIDTH//4, SCREEN_HEIGHT//4, 
-                                                      SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            pygame.draw.rect(screen, (0,100,0,200),
+                             (SCREEN_WIDTH//4, SCREEN_HEIGHT//4,
+                              SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
             win_text = ui.title_font.render("You Win!", True, WHITE)
-            screen.blit(win_text, (SCREEN_WIDTH//2 - win_text.get_width()//2, 
-                                 SCREEN_HEIGHT//2 - win_text.get_height()//2))
+            screen.blit(win_text,
+                        (SCREEN_WIDTH//2 - win_text.get_width()//2,
+                         SCREEN_HEIGHT//2 - win_text.get_height()//2))
             pygame.display.flip()
             pygame.time.wait(5000)
             running = False
-            
+
         if game_state.check_lose_condition():
-            print("You lose!")
-            pygame.draw.rect(screen, (100, 0, 0, 200), (SCREEN_WIDTH//4, SCREEN_HEIGHT//4, 
-                                                      SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            pygame.draw.rect(screen, (100,0,0,200),
+                             (SCREEN_WIDTH//4, SCREEN_HEIGHT//4,
+                              SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
             lose_text = ui.title_font.render("Game Over", True, WHITE)
-            screen.blit(lose_text, (SCREEN_WIDTH//2 - lose_text.get_width()//2, 
-                                  SCREEN_HEIGHT//2 - lose_text.get_height()//2))
+            screen.blit(lose_text,
+                        (SCREEN_WIDTH//2 - lose_text.get_width()//2,
+                         SCREEN_HEIGHT//2 - lose_text.get_height()//2))
             pygame.display.flip()
             pygame.time.wait(5000)
             running = False
-        
+
         screen.fill(BLACK)
-        
         terrain.render(screen, camera_offset)
         buildings.render(screen, camera_offset)
         animals.render(screen, camera_offset)
         economy.render(screen, camera_offset)
         vehicles.render(screen, camera_offset)
-        
         ui.draw(screen, camera_offset, mouse_pos)
-        
         pygame.display.flip()
-    
+
     pygame.quit()
     sys.exit()
 
@@ -1131,8 +1473,126 @@ if __name__ == '__main__':
             difficulty = 'medium'
     else:
         difficulty = 'medium'
-    
+
     main(difficulty)
+
+// File: new_game.py
+import tkinter as tk
+from tkinter import messagebox
+
+class NewAdventureWindow:
+    def __init__(self, root, main_menu_ref):
+        self.root = root
+        self.main_menu_ref = main_menu_ref
+        self.root.title("New Adventure")
+        self.root.geometry("600x400")
+        self.root.configure(bg="#b2d8b2")
+        self.placeholder = "Enter park name here"
+        self.build_ui()
+
+    def build_ui(self):
+        container = tk.Frame(self.root, bg="#222222", bd=5, relief="ridge")
+        container.place(relx=0.5, rely=0.5, anchor="center", width=400, height=250)
+
+        tk.Label(container, text="NEW ADVENTURE", font=("Helvetica", 20, "bold"),
+                 fg="yellow", bg="#222222").pack(pady=(10, 5))
+
+        tk.Label(container, text="What is your safari park name?", font=("Helvetica", 13, "bold"),
+                 fg="yellow", bg="#222222").pack()
+
+        self.name_entry = tk.Entry(container, font=("Helvetica", 12), justify="center",
+                                   bd=2, relief="solid", fg="gray", bg="white")
+        self.name_entry.insert(0, self.placeholder)
+        self.name_entry.bind("<FocusIn>", self.clear_placeholder)
+        self.name_entry.pack(pady=10, ipadx=10, ipady=5)
+
+        button_frame = tk.Frame(container, bg="#222222")
+        button_frame.pack(pady=10)
+
+        self.make_button(button_frame, "Back", self.on_back).grid(row=0, column=0, padx=10)
+        self.make_button(button_frame, "Continue", self.on_continue).grid(row=0, column=1, padx=10)
+
+    def make_button(self, parent, text, command):
+        return tk.Button(parent, text=text, font=("Helvetica", 10, "bold"), width=10,
+                         bg="#c58b39", fg="white", activebackground="#a4692f",
+                         relief="raised", command=command)
+
+    def clear_placeholder(self, event):
+        if self.name_entry.get() == self.placeholder:
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.config(fg="black")
+
+    def on_back(self):
+        self.root.destroy()
+        self.main_menu_ref.deiconify()
+
+    def on_continue(self):
+        park_name = self.name_entry.get().strip()
+        if not park_name or park_name == self.placeholder:
+            messagebox.showwarning("Input Required", "Please enter a valid park name.")
+            return
+        self.root.destroy()
+        print(f"Park name: {park_name}")  # 🔁 Replace with your game-start logic
+
+// File: settings_page.py
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+class SafariSettingsApp:
+    def __init__(self, root, main_menu_ref, bg_music, roar):
+        self.root = root
+        self.main_menu_ref = main_menu_ref
+        self.bg_music = bg_music
+        self.roar = roar
+
+        self.root.title("Safari Park Settings")
+        self.root.geometry("600x500")
+        self.root.configure(bg="#b2d8b2")
+        self.build_ui()
+
+    def build_ui(self):
+        container = tk.Frame(self.root, bg="#333333", bd=3, relief="groove")
+        container.place(relx=0.5, rely=0.5, anchor="center", width=500, height=400)
+
+        tk.Label(container, text="Safari Settings", font=("Helvetica", 22, "bold"), fg="yellow", bg="#333333").pack(pady=15)
+
+        self.music_slider = self.add_slider(container, "Music Volume")
+        self.sfx_slider = self.add_slider(container, "SFX Volume")
+
+        button_frame = tk.Frame(container, bg="#333333")
+        button_frame.pack(pady=20)
+
+        self.make_button(button_frame, "Apply Changes", self.apply_changes).grid(row=0, column=0, padx=5)
+        self.make_button(button_frame, "Back", self.back).grid(row=0, column=1, padx=5)
+        self.make_button(button_frame, "Exit Game", self.exit_game).grid(row=1, column=0, columnspan=2, pady=10)
+
+    def add_slider(self, parent, label_text):
+        frame = tk.Frame(parent, bg="#333333")
+        frame.pack(pady=5)
+        tk.Label(frame, text=label_text, font=("Helvetica", 11, "bold"), bg="#333333", fg="white").pack(anchor="w")
+        slider = ttk.Scale(frame, from_=0, to=100, orient="horizontal", length=300)
+        slider.set(50)
+        slider.pack()
+        return slider
+
+    def make_button(self, parent, text, command):
+        return tk.Button(parent, text=text, font=("Helvetica", 10, "bold"), width=14,
+                         bg="#c58b39", fg="white", activebackground="#a4692f", command=command)
+
+    def apply_changes(self):
+        music_vol = self.music_slider.get() / 100.0
+        sfx_vol = self.sfx_slider.get() / 100.0
+        self.bg_music.set_volume(music_vol)
+        self.roar.set_volume(sfx_vol)
+        self.roar.play()  # play to test sfx
+        messagebox.showinfo("Settings", f"Music: {int(music_vol*100)}%, SFX: {int(sfx_vol*100)}%")
+
+    def back(self):
+        self.root.destroy()
+        self.main_menu_ref.deiconify()
+
+    def exit_game(self):
+        self.root.quit()
 
 // File: terrain.py
 import pygame
@@ -1153,6 +1613,8 @@ class TerrainGenerator:
         
         self.terrain_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
         self.vegetation_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
+        self.entrance_tile = (0, self.size // 2)
+        self.exit_tile = (self.size - 1, self.size // 2)
         self.create_terrain_surfaces()
     
     def generate_terrain_grid(self):
@@ -1356,6 +1818,42 @@ class TerrainGenerator:
             print(f"Error loading terrain: {str(e)}")
             return False
 
+    def find_path(self, start, goal):
+        from heapq import heappop, heappush
+
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heappush(open_set, (0, start))
+        came_from = {}
+        g_score = {start: 0}
+
+        while open_set:
+            _, current = heappop(open_set)
+            if current == goal:
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                return path[::-1]
+
+            neighbors = [(current[0] + dx, current[1] + dy) 
+                        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]]
+
+            for neighbor in neighbors:
+                if not (0 <= neighbor[0] < self.size and 0 <= neighbor[1] < self.size):
+                    continue
+                if self.terrain_grid[neighbor[1]][neighbor[0]]["type"] != "path":
+                    continue
+                tentative_g = g_score[current] + 1
+                if tentative_g < g_score.get(neighbor, float('inf')):
+                    g_score[neighbor] = tentative_g
+                    f_score = tentative_g + heuristic(neighbor, goal)
+                    heappush(open_set, (f_score, neighbor))
+                    came_from[neighbor] = current
+        return []
+
 // File: tourist.py
 import pygame
 import random
@@ -1453,43 +1951,63 @@ class Tourist(pygame.sprite.Sprite):
     
     def move(self, dt):
         """Move around the park"""
+
         if self.waiting_time > 0:
             self.waiting_time -= dt
             return
-        
+
+        if self.path and self.path_index < len(self.path):
+            self.target_position = self.path[self.path_index]
+            if distance(self.position, self.target_position) < TILE_SIZE / 2:
+                self.path_index += 1
+                if self.path_index >= len(self.path):
+                    self.path = []
+                    self.target_position = None
+                    self.waiting_time = random.uniform(5, 20)
+                    return
+
         if not self.target_position or distance(self.position, self.target_position) < TILE_SIZE:
             self.choose_new_target()
             self.waiting_time = random.uniform(5, 20)
             return
-        
+
         direction_x = self.target_position[0] - self.position[0]
         direction_y = self.target_position[1] - self.position[1]
-        
         dir_length = math.sqrt(direction_x**2 + direction_y**2)
         if dir_length > 0:
-            direction_x = direction_x / dir_length
-            direction_y = direction_y / dir_length
-        
+            direction_x /= dir_length
+            direction_y /= dir_length
+
         speed = self.speed * dt
-        
         move_x = direction_x * speed
         move_y = direction_y * speed
-        
         new_pos = (self.position[0] + move_x, self.position[1] + move_y)
-        
+
         if not self.terrain.is_water_at_position(new_pos):
             self.position = new_pos
             self.rect.center = self.position
+
     
     def choose_new_target(self):
         """Choose a new target to move towards"""
+
+        if not self.path:
+            start_tile = self.terrain.world_to_grid(self.position)
+            path = self.terrain.find_path(start_tile, self.terrain.exit_tile)
+            if path:
+                self.path = [self.terrain.grid_to_world(p) for p in path]
+                self.path_index = 0
+                self.target_position = self.path[self.path_index]
+                return
+            else:
+                self.path = []
+
         paths = [b for b in self.manager.buildings.buildings 
-               if b.building_type == "path"]
+                if b.building_type == "path"]
         platforms = [b for b in self.manager.buildings.buildings 
                     if b.building_type == "viewing_platform"]
-        
         animals = self.manager.animals.animals
-        
+
         if random.random() < 0.7 and paths:
             target = random.choice(paths)
             self.target_position = target.position
@@ -1501,14 +2019,13 @@ class Tourist(pygame.sprite.Sprite):
             self.target_position = target.position
         else:
             terrain_size = self.terrain.size * TILE_SIZE
-            x = random.uniform(-terrain_size/2, terrain_size/2)
-            y = random.uniform(-terrain_size/2, terrain_size/2)
-            
+            x = random.uniform(-terrain_size / 2, terrain_size / 2)
+            y = random.uniform(-terrain_size / 2, terrain_size / 2)
             while self.terrain.is_water_at_position((x, y)):
-                x = random.uniform(-terrain_size/2, terrain_size/2)
-                y = random.uniform(-terrain_size/2, terrain_size/2)
-            
+                x = random.uniform(-terrain_size / 2, terrain_size / 2)
+                y = random.uniform(-terrain_size / 2, terrain_size / 2)
             self.target_position = (x, y)
+
     
     def spend_money(self):
         """Tourist spends money based on their satisfaction"""
@@ -1818,9 +2335,12 @@ class UIManager:
         
         for building in self.building_manager.buildings:
             if distance(building.position, world_pos) < TILE_SIZE:
-                info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                if hasattr(building, "health"):
+                    info_text += f" | {building.building_type.capitalize()} (Health: {building.health:.0f}%)"
+                else:
+                    info_text += f" | {building.building_type.capitalize()}"
                 break
-        
+
         for animal in self.animal_manager.animals:
             if distance(animal.position, world_pos) < TILE_SIZE:
                 info_text += f" | {animal.species.capitalize()} (H:{animal.health:.0f}% F:{animal.hunger:.0f}% W:{animal.thirst:.0f}%)"
@@ -1877,80 +2397,126 @@ class UIManager:
         return False
 
 // File: vehicle.py
-import pygame
+import pygame, math, random
 from constants import *
 
-class VehicleManager:
-    def __init__(self, game_state, buildings, terrain):
-        self.game_state = game_state
-        self.buildings = buildings
+class Jeep(pygame.sprite.Sprite):
+    def __init__(self, terrain, economy_manager):
+        super().__init__()
         self.terrain = terrain
-        self.vehicles = []
-        self.vehicles_group = pygame.sprite.Group()
-    
+        self.econ    = economy_manager
+
+        size = (int(TILE_SIZE*1.5), TILE_SIZE)
+        self.image = pygame.Surface(size, pygame.SRCALPHA)
+        self.image.fill(OLIVE)
+        self.rect  = self.image.get_rect()
+
+        self.grid_path = []
+        self.path_idx  = 0
+        self.state     = "idle"
+        self.capacity  = 4
+        self.passengers = []
+
+        ex, ey = terrain.grid_to_world(terrain.entrance_tile)
+        self.position = (ex, ey)
+        self.rect.center = self.position
+        self.speed = 3.0 * (TILE_SIZE/32)
+
+    def update(self, dt):
+        if self.state == "idle":
+            waiting = [t for t in self.econ.tourists 
+                       if self.terrain.world_to_grid(t.position)==self.terrain.entrance_tile]
+            if waiting:
+                for t in waiting[:self.capacity]:
+                    self.passengers.append(t)
+                    self.econ.tourists.remove(t)
+                    self.econ.tourists_group.remove(t)
+                route = self.terrain.find_path(
+                    self.terrain.entrance_tile,
+                    self.terrain.exit_tile
+                )
+                self.grid_path = route
+                self.path_idx = 0
+                self.state = "to_exit"
+        elif self.state in ("to_exit","to_entrance"):
+            if self.path_idx < len(self.grid_path):
+                target = self.terrain.grid_to_world(self.grid_path[self.path_idx])
+                self._move_toward(target, dt)
+                if math.hypot(self.position[0]-target[0], self.position[1]-target[1]) < 2:
+                    self.path_idx += 1
+            else:
+                if self.state=="to_exit":
+                    for _ in self.passengers: 
+                        self.econ.daily_income += self.econ.entrance_fee
+                        self.econ.game_state.add_funds(self.econ.entrance_fee)
+                    self.passengers.clear()
+                    route = self.terrain.find_path(
+                        self.terrain.exit_tile,
+                        self.terrain.entrance_tile
+                    )
+                    self.grid_path = route
+                    self.path_idx = 0
+                    self.state = "to_entrance"
+                else:
+                    self.state = "idle"
+
+        self.rect.center = self.position
+
+    def _move_toward(self, target, dt):
+        dx = target[0]-self.position[0]
+        dy = target[1]-self.position[1]
+        dist = math.hypot(dx,dy)
+        if dist>0:
+            dx, dy = dx/dist, dy/dist
+            self.position = (
+                self.position[0] + dx*self.speed*dt,
+                self.position[1] + dy*self.speed*dt
+            )
+
+class VehicleManager:
+    def __init__(self, game_state, building_manager, terrain, economy_manager):
+        self.game_state = game_state
+        self.buildings = building_manager
+        self.terrain   = terrain
+        self.econ      = economy_manager
+
+        self.vehicles = pygame.sprite.Group()
+
     def purchase_jeep(self):
-        """Purchase a jeep for the park"""
         cost = 1000
         if self.game_state.funds < cost:
-            self.game_state.add_notification("Not enough funds to purchase a jeep")
+            self.game_state.add_notification("Not enough funds for jeep")
             return False
-        
         self.game_state.add_funds(-cost)
+        jeep = Jeep(self.terrain, self.econ)
+        self.vehicles.add(jeep)
         self.game_state.add_notification("Purchased a safari jeep!")
-        
-        # Create jeep sprite
-        jeep = pygame.sprite.Sprite()
-        jeep_size = (int(TILE_SIZE * 1.5), int(TILE_SIZE))
-        jeep.image = pygame.Surface(jeep_size, pygame.SRCALPHA)
-        jeep.image.fill(OLIVE)
-        jeep.rect = jeep.image.get_rect()
-        jeep.rect.center = (0, 0)
-        jeep.position = (0, 0)
-        
-        self.vehicles.append(jeep)
-        self.vehicles_group.add(jeep)
         return True
-    
+
     def update(self, dt):
-        """Update vehicles (minimal implementation)"""
-        for vehicle in self.vehicles:
-            if random.random() < 0.02:
-                terrain_size = self.terrain.size * TILE_SIZE / 3
-                target_x = random.uniform(-terrain_size, terrain_size)
-                target_y = random.uniform(-terrain_size, terrain_size)
-                
-                # Set up movement animation (simplified)
-                curr_x, curr_y = vehicle.position
-                dx = (target_x - curr_x) / (5 * FPS) # Move over 5 seconds
-                dy = (target_y - curr_y) / (5 * FPS)
-                
-                vehicle.dx = dx
-                vehicle.dy = dy
-                vehicle.move_timer = 5 * FPS
-            
-            if hasattr(vehicle, 'move_timer') and vehicle.move_timer > 0:
-                # Continue animation
-                vehicle.position = (vehicle.position[0] + vehicle.dx, 
-                                   vehicle.position[1] + vehicle.dy)
-                vehicle.rect.center = vehicle.position
-                vehicle.move_timer -= 1
-    
+        for v in self.vehicles:
+            v.update(dt)
+
     def render(self, screen, camera_offset):
-        """Render all vehicles with camera offset"""
-        for vehicle in self.vehicles:
-            # Check if vehicle is within visible area before rendering
-            screen_pos = (vehicle.position[0] - camera_offset[0], 
-                         vehicle.position[1] - camera_offset[1])
-            
-            # Skip rendering if completely off-screen
-            if (screen_pos[0] < -100 or screen_pos[0] > SCREEN_WIDTH + 100 or
-                screen_pos[1] < -100 or screen_pos[1] > SCREEN_HEIGHT + 100):
-                continue
-            
-            # Calculate position accounting for image size and center
-            rect = vehicle.image.get_rect()
-            rect.center = screen_pos
-            
-            screen.blit(vehicle.image, rect)
+        for v in self.vehicles:
+            sx = v.position[0] - camera_offset[0]
+            sy = v.position[1] - camera_offset[1]
+            if -100 < sx < SCREEN_WIDTH+100 and -100 < sy < SCREEN_HEIGHT+100:
+                rect = v.image.get_rect(center=(sx,sy))
+                screen.blit(v.image, rect)
 
+// File: utils.py
+import math
 
+def distance(pos1, pos2):
+    return math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
+
+def lerp_color(color1, color2, t):
+    """Linear interpolation between two colors"""
+    r = int(color1[0] + (color2[0] - color1[0]) * t)
+    g = int(color1[1] + (color2[1] - color1[1]) * t)
+    b = int(color1[2] + (color2[2] - color1[2]) * t)
+    if len(color1) > 3 and len(color2) > 3:
+        a = int(color1[3] + (color2[3] - color1[3]) * t)
+        return (r, g, b, a)
+    return (r, g, b)

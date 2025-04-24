@@ -16,6 +16,8 @@ class TerrainGenerator:
         
         self.terrain_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
         self.vegetation_surface = pygame.Surface((size * self.tile_size, size * self.tile_size), pygame.SRCALPHA)
+        self.entrance_tile = (0, self.size // 2)
+        self.exit_tile = (self.size - 1, self.size // 2)
         self.create_terrain_surfaces()
     
     def generate_terrain_grid(self):
@@ -218,3 +220,39 @@ class TerrainGenerator:
         except Exception as e:
             print(f"Error loading terrain: {str(e)}")
             return False
+
+    def find_path(self, start, goal):
+        from heapq import heappop, heappush
+
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heappush(open_set, (0, start))
+        came_from = {}
+        g_score = {start: 0}
+
+        while open_set:
+            _, current = heappop(open_set)
+            if current == goal:
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                return path[::-1]
+
+            neighbors = [(current[0] + dx, current[1] + dy) 
+                        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]]
+
+            for neighbor in neighbors:
+                if not (0 <= neighbor[0] < self.size and 0 <= neighbor[1] < self.size):
+                    continue
+                if self.terrain_grid[neighbor[1]][neighbor[0]]["type"] != "path":
+                    continue
+                tentative_g = g_score[current] + 1
+                if tentative_g < g_score.get(neighbor, float('inf')):
+                    g_score[neighbor] = tentative_g
+                    f_score = tentative_g + heuristic(neighbor, goal)
+                    heappush(open_set, (f_score, neighbor))
+                    came_from[neighbor] = current
+        return []
