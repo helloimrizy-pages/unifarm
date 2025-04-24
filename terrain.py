@@ -248,18 +248,22 @@ class TerrainGenerator:
                     current = came_from[current]
                 return path[::-1]
 
-            neighbors = [(current[0] + dx, current[1] + dy) 
-                        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]]
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                neighbor = (current[0] + dx, current[1] + dy)
+                nx, ny = neighbor
 
-            for neighbor in neighbors:
-                if not (0 <= neighbor[0] < self.size and 0 <= neighbor[1] < self.size):
+                if not (0 <= nx < self.size and 0 <= ny < self.size):
                     continue
-                if self.terrain_grid[neighbor[1]][neighbor[0]]["type"] != "path":
+
+                tile_type = self.terrain_grid[ny][nx]["type"]
+                if neighbor != goal and tile_type != "path":
                     continue
+
                 tentative_g = g_score[current] + 1
                 if tentative_g < g_score.get(neighbor, float('inf')):
+                    came_from[neighbor] = current
                     g_score[neighbor] = tentative_g
                     f_score = tentative_g + heuristic(neighbor, goal)
                     heappush(open_set, (f_score, neighbor))
-                    came_from[neighbor] = current
+
         return []

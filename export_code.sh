@@ -20,7 +20,7 @@ fi
 directories=()
 
 # List of specific files to include
-specific_files=("animal_manager.py" "animal.py" "building.py" "building_manager.py" "components.py" "economy_manager.py" "constants.py" "game_state.py" "game_over_screen.py" "main_menu.py" "main.py" "new_game.py" "settings_page.py" "terrain.py" "tourist.py" "ui.py" "vehicle.py" "utils.py")
+specific_files=("animal_manager.py" "animal.py" "building.py" "building_manager.py" "components.py" "economy_manager.py" "constants.py" "game_state.py" "load_game" "game_over_screen.py" "main_menu.py" "main.py" "new_game.py" "settings_page.py" "terrain.py" "tourist.py" "ui.py" "vehicle.py" "utils.py")
 
 # List of file types to ignore
 ignore_files=("*.ico" "*.png" "*.jpg" "*.jpeg" "*.gif" "*.svg" "*.pyc")

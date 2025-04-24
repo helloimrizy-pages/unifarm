@@ -13,6 +13,9 @@ class BuildingManager:
         self.buildings_group = pygame.sprite.Group()
         self.pending_building_type = None
         
+        self.entrance_tile = None
+        self.exit_tile     = None
+
         self.building_config = {
             "feeding_station": {
                 "scale": (2, 2),
@@ -77,34 +80,41 @@ class BuildingManager:
     def place_building(self, building_type, world_pos):
         self.pending_building_type = building_type
 
-        # check occupancy
         if self.is_position_occupied(world_pos):
             self.game_state.add_notification("Can't build there!")
             return False
 
-        # pay cost
         cost = self.building_config[building_type]["cost"]
         self.game_state.add_funds(-cost)
 
         if building_type == "path":
-            # convert terrain cell under mouse into a road tile
             gx, gy = self.terrain.world_to_grid(world_pos)
             self.terrain.terrain_grid[gy][gx]["type"] = "path"
-            # redraw only that cell
-            tx = gx * TILE_SIZE
-            ty = gy * TILE_SIZE
+
+            tx, ty = gx * TILE_SIZE, gy * TILE_SIZE
             pygame.draw.rect(self.terrain.terrain_surface,
                             self.building_config["path"]["color"],
                             (tx, ty, TILE_SIZE, TILE_SIZE))
+
+            cell = (gx, gy)
             self.buildings.append(SimpleNamespace(
                 building_type="path",
-                position=self.terrain.grid_to_world((gx,gy)),
-                rect=pygame.Rect(tx, ty, TILE_SIZE, TILE_SIZE)
-            ) )
+                position=self.terrain.grid_to_world(cell),
+                rect=pygame.Rect(tx, ty, TILE_SIZE, TILE_SIZE),
+                grid_pos=cell
+            ))
+
+            if self.entrance_tile is None:
+                self.entrance_tile = cell
+                self.terrain.entrance_tile = cell
+
+            self.exit_tile = cell
+            self.terrain.exit_tile = cell
+
             self.game_state.add_notification(f"Built road for ${cost}")
             return True
 
-        # otherwise a “real” building
+
         b = Building(building_type, world_pos, self)
         self.buildings.append(b)
         self.game_state.add_notification(f"Built {building_type} for ${cost}")
@@ -134,7 +144,6 @@ class BuildingManager:
     def update(self, dt):
         """Update all non-road buildings each frame."""
         for b in list(self.buildings):
-            # only real Building instances have step(); skip 'path' entries
             if getattr(b, "building_type", None) != "path":
                 b.step(dt)
     
@@ -149,7 +158,7 @@ class BuildingManager:
         """Render all buildings with camera offset"""
         for building in self.buildings:
             if not hasattr(building, "image"):
-                continue  # Skip rendering if no image (e.g., for paths)
+                continue
 
             screen_pos = (building.position[0] - camera_offset[0], 
                         building.position[1] - camera_offset[1])
@@ -183,11 +192,10 @@ class BuildingManager:
 
         base_score = min(80, path_count * 5 + platform_count * 15)
 
-        # Only consider buildings with health (i.e., real Building instances)
         buildings_with_health = [b for b in self.buildings if hasattr(b, "health")]
 
         if not buildings_with_health:
-            return base_score  # Avoid division by zero
+            return base_score
 
         avg_health = sum(b.health for b in buildings_with_health) / len(buildings_with_health)
         health_factor = avg_health / 100
