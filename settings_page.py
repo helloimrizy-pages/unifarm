@@ -9,7 +9,7 @@ class SafariSettingsApp:
         self.roar = roar
 
         self.root.title("Safari Park Settings")
-        self.root.geometry("600x500")
+        self.root.geometry("1600x900")
         self.root.configure(bg="#b2d8b2")
         self.build_ui()
 
